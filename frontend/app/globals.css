@@ -1,0 +1,18 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+.delta-badge {
+    display: inline-flex;
+    align-items: center;
+    font-size: 10px;
+    padding: 0 6px;
+    border-radius: 9999px;
+    margin-left: 4px;
+    border: 1px solid transparent;
+    white-space: nowrap;
+  }
+  .delta-up { background-color:#ecfdf5; color:#16a34a; border-color:#bbf7d0; }
+  .delta-down { background-color:#fef2f2; color:#dc2626; border-color:#fecaca; }
+  .delta-flat { background-color:#f3f4f6; color:#4b5563; border-color:#e5e7eb; }
+  .delta-na { background-color:#f9fafb; color:#9ca3af; border-color:#e5e7eb; }

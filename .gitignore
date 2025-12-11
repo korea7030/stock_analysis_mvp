@@ -1,0 +1,4 @@
+.env
+test.html
+**/node_modules/*
+**/.next

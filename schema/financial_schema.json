@@ -1,0 +1,55 @@
+{
+  "meta": {
+    "company_name": null,
+    "ticker": null,
+    "report_type": null,
+    "period_end": null,
+    "filing_date": null,
+    "fiscal_quarter": null,
+    "unit": null
+  },
+  "balance": {
+    "total_current_assets": null,
+    "cash_and_cash_equivalents": null,
+    "short_term_investments": null,
+    "total_assets": null,
+    "total_current_liabilities": null,
+    "total_liabilities": null,
+    "total_equity": null,
+    "total_debt": null
+  },
+  "income": {
+    "total_revenue": null,
+    "cost_of_revenue": null,
+    "gross_profit": null,
+    "operating_income": null,
+    "net_income": null
+  },
+  "cashflow": {
+    "operating_cash_flow": null,
+    "capex": null,
+    "financing_cash_flow": null,
+    "net_cash_change": null
+  },
+  "financials": {
+    "three_months": {
+      "current": {},
+      "previous": {},
+      "growth_rate": {}
+    },
+    "nine_months": {
+      "current": {},
+      "previous": {},
+      "growth_rate": {}
+    }
+  },
+  "derived": {
+    "current_ratio": null,
+    "equity_ratio": null,
+    "net_cash": null,
+    "gross_margin": null,
+    "operating_margin": null,
+    "net_margin": null,
+    "fcf": null
+  }
+}
