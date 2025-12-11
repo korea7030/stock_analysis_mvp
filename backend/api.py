@@ -12,7 +12,10 @@ app = FastAPI(
     version="1.0.0"
 )
 
-origins = ["http://localhost:3000"]
+origins = [
+    "http://localhost:3000",
+    "https://stock-analysis-3w5sgyldj-korea7030s-projects.vercel.app"
+]
 
 app.add_middleware(
     CORSMiddleware,

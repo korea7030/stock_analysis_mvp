@@ -15,8 +15,11 @@ export default function Dashboard() {
       setError(null);
       setData(null);
 
+      const API_BASE =
+        process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
+
       const res = await fetch(
-        `http://localhost:8000/analyze?ticker=${ticker}&form=${form}`
+        `${API_BASE}/analyze?ticker=${ticker}&form=${form}`
       );
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = await res.json();

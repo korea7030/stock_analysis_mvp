@@ -3,3 +3,4 @@ test.html
 **/node_modules/*
 **/.next
 **/__pycache__/**
+frontend/.env.local
