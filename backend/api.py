@@ -1,3 +1,4 @@
+import os
 from fastapi import FastAPI, Query
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -12,10 +13,8 @@ app = FastAPI(
     version="1.0.0"
 )
 
-origins = [
-    "http://localhost:3000",
-    "https://stock-analysis-3w5sgyldj-korea7030s-projects.vercel.app"
-]
+raw_origins = os.getenv("ALLOWED_ORIGINS", "")
+origins = [o.strip() for o in raw_origins.split(",") if o.strip()]
 
 app.add_middleware(
     CORSMiddleware,
