@@ -4,12 +4,18 @@ import { useState } from "react";
 
 export default function Dashboard() {
   const [ticker, setTicker] = useState("AAPL");
-  const [form, setForm] = useState<"10-Q" | "10-K">("10-Q");
+  const [form, setForm] = useState<"10-Q" | "6-K">("10-Q");
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [inputError, setInputError] = useState<string | null>(null);
 
   async function analyze() {
+    if (!ticker.trim()) {
+      setInputError("Ticker를 입력하세요");
+      return;
+    }
+
     try {
       setLoading(true);
       setError(null);
@@ -220,7 +226,7 @@ export default function Dashboard() {
 
   return (
     <div className="max-w-7xl mx-auto p-6 space-y-6">
-      <h1 className="text-3xl font-bold">10-Q / 10-K Financial Dashboard</h1>
+      <h1 className="text-3xl font-bold">10-Q / 6-K Financial Dashboard</h1>
 
       {/* 입력 영역 */}
       <div className="bg-white rounded-xl shadow p-4 flex flex-wrap gap-4 items-center">
@@ -229,8 +235,23 @@ export default function Dashboard() {
           <input
             value={ticker}
             onChange={(e) => setTicker(e.target.value.toUpperCase())}
-            className="border rounded px-3 py-2 min-w-[140px]"
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                analyze();
+              }
+            }}
+            className={`border rounded px-3 py-2 min-w-[140px] ${
+              inputError ? "border-red-500" : ""
+            }`}
           />
+          {/* 🔥 항상 자리를 차지하는 에러 영역 */}
+          <div className="h-4 mt-1">
+            {inputError && (
+              <span className="text-xs text-red-600">
+                {inputError}
+              </span>
+            )}
+          </div>
         </div>
 
         <div className="flex flex-col">
@@ -247,10 +268,10 @@ export default function Dashboard() {
             <label className="flex gap-1 items-center text-sm">
               <input
                 type="radio"
-                checked={form === "10-K"}
-                onChange={() => setForm("10-K")}
+                checked={form === "6-K"}
+                onChange={() => setForm("6-K")}
               />
-              10-K
+              6-K
             </label>
           </div>
         </div>

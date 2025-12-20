@@ -4,12 +4,12 @@ from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 
-from backend.analyzer import run_analysis   # 수정된 analyzer (원본 표 HTML 포함)
-from backend.mongo import save_to_mongo     # 기존 MongoDB 저장 함수
+from analyzer import run_analysis   # 수정된 analyzer (원본 표 HTML 포함)
+from mongo import save_to_mongo     # 기존 MongoDB 저장 함수
 
 
 app = FastAPI(
-    title="SEC 10-Q / 10-K Analyzer API",
+    title="SEC 10-Q / 6-K Analyzer API",
     version="1.0.0"
 )
 
