@@ -231,8 +231,8 @@ def run_analysis(ticker: str, form: str = "10-Q"):
     if isinstance(html, bytes):
         html = html.decode("utf-8", errors="ignore")
         
-    with open('test.html', 'w') as f:
-        f.write(html)
+    # with open('test.html', 'w') as f:
+    #     f.write(html)
 
     income_html, balance_html, cashflow_html = extract_raw_tables(html)
 
