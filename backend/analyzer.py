@@ -234,26 +234,271 @@ def extract_meta(html, ticker, form):
 # 테이블 추출
 # ----------------------------
 
+
+def _table_text_with_context(table) -> str:
+    table_text = table.get_text(" ", strip=True).lower()
+    prev = table.find_previous(
+        [
+            "h1",
+            "h2",
+            "h3",
+            "h4",
+            "h5",
+            "h6",
+            "p",
+            "div",
+            "center",
+            "b",
+            "strong",
+        ]
+    )
+    prev_text = prev.get_text(" ", strip=True).lower() if prev else ""
+    if len(prev_text) > 200:
+        prev_text = ""
+    return f"{prev_text} {table_text}".strip()
+
+
+def _table_features(table) -> dict[str, float | int | bool | str]:
+    text = _table_text_with_context(table)
+    link_count = len(table.find_all("a"))
+    ix_count = len(table.find_all("ix:nonfraction"))
+
+    numeric_cells_total = 0
+    numeric_rows_with_2 = 0
+    nonempty_cells = 0
+    for tr in table.find_all("tr"):
+        row_numeric = 0
+        for td in tr.find_all("td"):
+            cell_text = td.get_text(" ", strip=True)
+            if cell_text:
+                nonempty_cells += 1
+            if parse_number(cell_text) is not None:
+                numeric_cells_total += 1
+                row_numeric += 1
+        if row_numeric >= 2:
+            numeric_rows_with_2 += 1
+
+    numeric_ratio = (numeric_cells_total / nonempty_cells) if nonempty_cells else 0.0
+    toc_flag = (
+        ("table of contents" in text)
+        or ("contents" in text and "table" in text)
+        or (re.search(r"\bpart\s+[ivx]+\b", text) is not None)
+        or ((re.search(r"\bitem\s+\d+[a-z]?\b", text) is not None) and (text.count("item ") >= 3))
+    )
+    period_cue = any(
+        substr in text
+        for substr in [
+            "three months ended",
+            "six months ended",
+            "nine months ended",
+            "year ended",
+            "years ended",
+            "as of",
+            "unaudited",
+        ]
+    )
+    non_primary_flag = any(
+        substr in text
+        for substr in [
+            "selected financial data",
+            "quarterly data",
+            "supplementary",
+            "index",
+        ]
+    )
+
+    return {
+        "text": text,
+        "link_count": link_count,
+        "ix_count": ix_count,
+        "numeric_cells_total": numeric_cells_total,
+        "numeric_rows_with_2": numeric_rows_with_2,
+        "nonempty_cells": nonempty_cells,
+        "numeric_ratio": numeric_ratio,
+        "toc_flag": toc_flag,
+        "period_cue": period_cue,
+        "non_primary_flag": non_primary_flag,
+    }
+
+
+def _score_income(f: dict[str, float | int | bool | str]) -> int:
+    text = str(f["text"])
+    score = 0
+    if bool(f["toc_flag"]):
+        score -= 6
+    if bool(f["non_primary_flag"]):
+        score -= 2
+    if int(f["link_count"]) >= 10 and float(f["numeric_ratio"]) < 0.20:
+        score -= 3
+
+    numeric_cells_total = int(f["numeric_cells_total"])
+    numeric_rows_with_2 = int(f["numeric_rows_with_2"])
+    ix_count = int(f["ix_count"])
+
+    if numeric_cells_total >= 10:
+        score += 2
+    elif numeric_cells_total >= 6:
+        score += 1
+    if numeric_rows_with_2 >= 3:
+        score += 2
+    elif numeric_rows_with_2 >= 2:
+        score += 1
+    if ix_count >= 8:
+        score += 2
+    elif ix_count >= 4:
+        score += 1
+
+    if any(
+        k in text
+        for k in [
+            "statements of operations",
+            "statement of operations",
+            "income statement",
+            "statements of income",
+            "statements of earnings",
+        ]
+    ):
+        score += 3
+
+    line_score = 0
+    if "revenue" in text or "net sales" in text:
+        line_score += 1
+    if "net income" in text or "net loss" in text:
+        line_score += 1
+    if "gross profit" in text:
+        line_score += 1
+    if "operating income" in text:
+        line_score += 1
+    if "earnings per share" in text:
+        line_score += 1
+    if "cost of revenue" in text or "cost of sales" in text:
+        line_score += 1
+    score += min(line_score, 4)
+
+    if bool(f["period_cue"]):
+        score += 1
+    return score
+
+
+def _score_balance(f: dict[str, float | int | bool | str]) -> int:
+    text = str(f["text"])
+    score = 0
+    if bool(f["toc_flag"]):
+        score -= 6
+    if bool(f["non_primary_flag"]):
+        score -= 2
+    if int(f["link_count"]) >= 10 and float(f["numeric_ratio"]) < 0.20:
+        score -= 3
+
+    numeric_cells_total = int(f["numeric_cells_total"])
+    numeric_rows_with_2 = int(f["numeric_rows_with_2"])
+    ix_count = int(f["ix_count"])
+
+    if numeric_cells_total >= 10:
+        score += 2
+    elif numeric_cells_total >= 6:
+        score += 1
+    if numeric_rows_with_2 >= 3:
+        score += 2
+    elif numeric_rows_with_2 >= 2:
+        score += 1
+    if ix_count >= 8:
+        score += 2
+    elif ix_count >= 4:
+        score += 1
+
+    if any(k in text for k in ["balance sheet", "statement of financial position"]):
+        score += 3
+
+    line_score = 0
+    if "total assets" in text:
+        line_score += 1
+    if "total liabilities" in text:
+        line_score += 1
+    if (
+        "total equity" in text
+        or "stockholders" in text
+        or "shareholders' equity" in text
+        or "shareholders’ equity" in text
+    ):
+        line_score += 1
+    if "cash and cash equivalents" in text:
+        line_score += 1
+    score += min(line_score, 4)
+
+    if "as of" in text:
+        score += 1
+    return score
+
+
+def _score_cashflow(f: dict[str, float | int | bool | str]) -> int:
+    text = str(f["text"])
+    score = 0
+    if bool(f["toc_flag"]):
+        score -= 6
+    if bool(f["non_primary_flag"]):
+        score -= 2
+    if int(f["link_count"]) >= 10 and float(f["numeric_ratio"]) < 0.20:
+        score -= 3
+
+    numeric_cells_total = int(f["numeric_cells_total"])
+    numeric_rows_with_2 = int(f["numeric_rows_with_2"])
+    ix_count = int(f["ix_count"])
+
+    if numeric_cells_total >= 10:
+        score += 2
+    elif numeric_cells_total >= 6:
+        score += 1
+    if numeric_rows_with_2 >= 3:
+        score += 2
+    elif numeric_rows_with_2 >= 2:
+        score += 1
+    if ix_count >= 8:
+        score += 2
+    elif ix_count >= 4:
+        score += 1
+
+    if any(k in text for k in ["statement of cash flows", "statements of cash flows", "cash flows"]):
+        score += 3
+
+    line_score = 0
+    if "operating activities" in text:
+        line_score += 1
+    if "investing activities" in text:
+        line_score += 1
+    if "financing activities" in text:
+        line_score += 1
+    if "net cash" in text or "net cash provided" in text:
+        line_score += 1
+    score += min(line_score, 4)
+
+    if bool(f["period_cue"]):
+        score += 1
+    return score
+
 def extract_raw_tables(html):
     soup = BeautifulSoup(html, "lxml")
 
-    income_html = None
-    balance_html = None
-    cashflow_html = None
+    best_income: tuple[int, str | None] = (-999, None)
+    best_balance: tuple[int, str | None] = (-999, None)
+    best_cashflow: tuple[int, str | None] = (-999, None)
 
     for table in soup.find_all("table"):
-        section = classify_table(table)
-        if not section:
-            continue
+        f = _table_features(table)
+        income_score = _score_income(f)
+        balance_score = _score_balance(f)
+        cashflow_score = _score_cashflow(f)
 
-        table_html = str(table)
+        if income_score > best_income[0]:
+            best_income = (income_score, str(table))
+        if balance_score > best_balance[0]:
+            best_balance = (balance_score, str(table))
+        if cashflow_score > best_cashflow[0]:
+            best_cashflow = (cashflow_score, str(table))
 
-        if section == "income_statement" and income_html is None:
-            income_html = table_html
-        elif section == "balance_sheet" and balance_html is None:
-            balance_html = table_html
-        elif section == "cash_flow" and cashflow_html is None:
-            cashflow_html = table_html
+    income_html = best_income[1] if best_income[0] >= 5 else None
+    balance_html = best_balance[1] if best_balance[0] >= 4 else None
+    cashflow_html = best_cashflow[1] if best_cashflow[0] >= 4 else None
 
     return income_html, balance_html, cashflow_html
 
