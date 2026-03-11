@@ -8,6 +8,9 @@ from typing import Any, Callable, Optional, TypeVar
 import requests
 from bs4 import BeautifulSoup
 from pyrate_limiter import Duration, Limiter, Rate
+from sec_downloader.types import RequestedFilings
+
+from backend.cache import TTLCache
 
 
 SEC_RPS = int(os.getenv("SEC_RPS", "10"))
@@ -78,6 +81,88 @@ def sec_get_filing_html(dl: Any, *, ticker: str, form: str, timeout_s: int = 30)
         return html
 
     return _retry(_call, attempts=3, base_sleep_s=0.5, max_sleep_s=4.0, label="sec_download")
+
+
+_SEC_INDEX_CACHE: TTLCache[dict[str, Any]] = TTLCache()
+
+
+def sec_get_filing_metadatas(
+    dl: Any,
+    *,
+    ticker: str,
+    form: str,
+    limit: int,
+) -> list[Any]:
+    query = RequestedFilings(ticker_or_cik=ticker, form_type=form, limit=limit)
+    return list(dl.get_filing_metadatas(query))
+
+
+def sec_download_filing_url(dl: Any, *, url: str) -> str:
+    def _call() -> str:
+        t0 = time.time()
+        SEC_LIMITER.try_acquire("sec", blocking=True)
+        waited_s = time.time() - t0
+        rate_limited = waited_s >= 0.01
+        print(f"[sec_download_url] rate_limited={rate_limited} waited_s={waited_s:.3f} url={url}")
+        call_timeout_s = int(os.getenv("SEC_CALL_TIMEOUT_S", "90"))
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
+            fut = ex.submit(dl.download_filing, url=url)
+            try:
+                html = fut.result(timeout=call_timeout_s)
+            except concurrent.futures.TimeoutError as e:
+                raise TimeoutError(f"SEC download timed out after {call_timeout_s}s") from e
+        if isinstance(html, bytes):
+            return html.decode("utf-8", errors="ignore")
+        return html
+
+    return _retry(_call, attempts=3, base_sleep_s=0.5, max_sleep_s=4.0, label="sec_download_url")
+
+
+def sec_get_exhibit_urls(*, cik: str, accession_number: str) -> list[str]:
+    accession_dir = accession_number.replace("-", "")
+    cache_key = f"sec_index:{cik}:{accession_dir}"
+    cached = _SEC_INDEX_CACHE.get(cache_key)
+    if cached is None:
+        url = f"https://www.sec.gov/Archives/edgar/data/{int(cik)}/{accession_dir}/index.json"
+        r = requests.get(
+            url,
+            headers={"User-Agent": "Stock Analysis MVP korea7030.jhl@gmail.com"},
+            timeout=20,
+        )
+        r.raise_for_status()
+        cached = r.json()
+        _SEC_INDEX_CACHE.set(cache_key, cached, ttl_s=86400)
+
+    items = (cached.get("directory") or {}).get("item") or []
+    ranked: list[tuple[int, str]] = []
+    for it in items:
+        name = str(it.get("name") or "")
+        if not name:
+            continue
+        size_raw = it.get("size")
+        try:
+            size = int(size_raw) if size_raw not in (None, "") else 0
+        except Exception:
+            size = 0
+
+        lower = name.lower()
+        if lower.endswith(".htm") or lower.endswith(".html"):
+            is_index = "-index" in lower or lower.endswith(".txt")
+            if is_index:
+                continue
+            is_ex99 = lower.startswith("ex99") or "dex99" in lower
+            score = size
+            if is_ex99:
+                score += 1_000_000
+            ranked.append((score, name))
+
+    ranked.sort(reverse=True)
+    urls: list[str] = []
+    for _score, name in ranked[:5]:
+        urls.append(
+            f"https://www.sec.gov/Archives/edgar/data/{int(cik)}/{accession_dir}/{name}"
+        )
+    return urls
 
 
 def marketbeat_get_weekly_earnings(timeout_s: int = 10) -> list[dict[str, Any]]:
