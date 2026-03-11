@@ -36,3 +36,4 @@ urllib3
 xxhash
 fastapi
 uvicorn
+pytest
