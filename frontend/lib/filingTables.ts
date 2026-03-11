@@ -80,34 +80,52 @@ export function annotateTableHTML(html: string, kind: AnnotateKind): string {
       return parseNumLocal(t) !== null;
     });
 
+    numericCells.forEach((cell) => {
+      cell.classList.add("numeric-cell");
+      cell.style.whiteSpace = "nowrap";
+    });
+
     if (kind === "income") {
-      if (numericCells.length !== 4) return;
+      if (numericCells.length >= 4) {
+        const curQCell = numericCells[0];
+        const prevQCell = numericCells[1];
+        const curYCell = numericCells[2];
+        const prevYCell = numericCells[3];
 
-      const curQCell = numericCells[0];
-      const prevQCell = numericCells[1];
-      const curYCell = numericCells[2];
-      const prevYCell = numericCells[3];
+        const curQ = parseNumLocal(curQCell.textContent);
+        const prevQ = parseNumLocal(prevQCell.textContent);
+        const curY = parseNumLocal(curYCell.textContent);
+        const prevY = parseNumLocal(prevYCell.textContent);
 
-      const curQ = parseNumLocal(curQCell.textContent);
-      const prevQ = parseNumLocal(prevQCell.textContent);
-      const curY = parseNumLocal(curYCell.textContent);
-      const prevY = parseNumLocal(prevYCell.textContent);
+        if (curQ != null && prevQ != null && !cellHasBadge(curQCell)) {
+          const pct = prevQ !== 0 ? (curQ - prevQ) / Math.abs(prevQ) : 0;
+          curQCell.appendChild(makeBadgeLocal(pct));
+        }
 
-      if (curQ != null && prevQ != null && !cellHasBadge(curQCell)) {
-        const pct = prevQ !== 0 ? (curQ - prevQ) / Math.abs(prevQ) : 0;
-        curQCell.appendChild(makeBadgeLocal(pct));
+        if (curY != null && prevY != null && !cellHasBadge(curYCell)) {
+          const pct = prevY !== 0 ? (curY - prevY) / Math.abs(prevY) : 0;
+          curYCell.appendChild(makeBadgeLocal(pct));
+        }
+
+        return;
       }
 
-      if (curY != null && prevY != null && !cellHasBadge(curYCell)) {
-        const pct = prevY !== 0 ? (curY - prevY) / Math.abs(prevY) : 0;
-        curYCell.appendChild(makeBadgeLocal(pct));
+      if (numericCells.length >= 2) {
+        const curCell = numericCells[0];
+        const prevCell = numericCells[1];
+        const cur = parseNumLocal(curCell.textContent);
+        const prev = parseNumLocal(prevCell.textContent);
+        if (cur == null || prev == null || cellHasBadge(curCell)) return;
+        const pct = prev !== 0 ? (cur - prev) / Math.abs(prev) : 0;
+        curCell.appendChild(makeBadgeLocal(pct));
       }
 
       return;
     }
 
-    if (numericCells.length === 2) {
-      const [curCell, prevCell] = numericCells;
+    if (numericCells.length >= 2) {
+      const curCell = numericCells[0];
+      const prevCell = numericCells[1];
       const cur = parseNumLocal(curCell.textContent);
       const prev = parseNumLocal(prevCell.textContent);
       if (cur == null || prev == null || cellHasBadge(curCell)) return;
