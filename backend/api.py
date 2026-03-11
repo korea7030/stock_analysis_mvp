@@ -91,6 +91,12 @@ async def analyze(
         if cached_last_updated is None:
             cached_payload = dict(cached_payload)
             cached_payload.pop("last_updated", None)
+        if not _has_financial_data(cached_payload):
+            return _error_response(
+                status_code=422,
+                code="no_financial_data",
+                message="해당 보고서에는 재무제표/지표 데이터가 없습니다. 다른 보고서를 선택해 주세요.",
+            )
         print(f"[cache] kind=analyze cache_hit=true key={cache_key}")
         return cached_payload
 
@@ -107,6 +113,14 @@ async def analyze(
 
         response_model = _build_analyze_response_model(schema, normalized_ticker, normalized_form)
         response_payload = _model_to_dict(response_model)
+
+        if not _has_financial_data(schema):
+            return _error_response(
+                status_code=422,
+                code="no_financial_data",
+                message="해당 보고서에는 재무제표/지표 데이터가 없습니다. 다른 보고서를 선택해 주세요.",
+            )
+
         _analyze_cache.set(cache_key, response_payload, ANALYZE_CACHE_TTL_S)
         return response_payload
 
@@ -241,6 +255,23 @@ def _build_analyze_response_model(schema: dict[str, Any], ticker: str, form: str
     if last_updated:
         response.last_updated = last_updated
     return response
+
+
+def _has_financial_data(schema: dict[str, Any]) -> bool:
+    tables = schema.get("tables") or {}
+    if tables.get("income_statement") or tables.get("balance_sheet") or tables.get("cash_flow"):
+        return True
+
+    metrics = schema.get("metrics") or {}
+    for val in metrics.values():
+        if isinstance(val, dict) and val.get("current") is not None:
+            return True
+
+    sections = schema.get("sections") or {}
+    if sections.get("mdna") or sections.get("risk_factors"):
+        return True
+
+    return False
 
 
 def _model_to_dict(model: Any) -> dict[str, Any]:
