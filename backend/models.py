@@ -20,8 +20,39 @@ class AnalyzeTables(BaseModel):
     cash_flow: Optional[str] = None
 
 
+class MetricValue(BaseModel):
+    current: Optional[float] = None
+    previous: Optional[float] = None
+    change_pct: Optional[float] = None
+
+
+class AnalyzeMetrics(BaseModel):
+    revenue: Optional[MetricValue] = None
+    gross_profit: Optional[MetricValue] = None
+    operating_income: Optional[MetricValue] = None
+    net_income: Optional[MetricValue] = None
+    eps_basic: Optional[MetricValue] = None
+    cash_and_equivalents: Optional[MetricValue] = None
+    total_assets: Optional[MetricValue] = None
+    total_liabilities: Optional[MetricValue] = None
+    total_equity: Optional[MetricValue] = None
+    long_term_debt: Optional[MetricValue] = None
+    operating_cash_flow: Optional[MetricValue] = None
+    capex: Optional[MetricValue] = None
+    free_cash_flow: Optional[MetricValue] = None
+
+
+class AnalyzeSections(BaseModel):
+    mdna: Optional[str] = None
+    risk_factors: Optional[str] = None
+    mdna_diff: Optional[str] = None
+    risk_factors_diff: Optional[str] = None
+
+
 class AnalyzeResponse(BaseModel):
     meta: AnalyzeMeta
+    metrics: Optional[AnalyzeMetrics] = None
+    sections: Optional[AnalyzeSections] = None
     tables: AnalyzeTables
     last_updated: Optional[str] = None
 

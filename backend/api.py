@@ -11,7 +11,15 @@ import uvicorn
 from backend.analyzer import run_analysis   # 수정된 analyzer (원본 표 HTML 포함)
 from backend.mongo import save_to_mongo     # 기존 MongoDB 저장 함수
 from backend.cache import TTLCache
-from backend.models import AnalyzeMeta, AnalyzeResponse, AnalyzeTables, ApiError, EarningsItem
+from backend.models import (
+    AnalyzeMeta,
+    AnalyzeMetrics,
+    AnalyzeResponse,
+    AnalyzeSections,
+    AnalyzeTables,
+    ApiError,
+    EarningsItem,
+)
 
 try:
     from backend.analyzer import get_marketbeat_earnings
@@ -20,7 +28,7 @@ except ImportError:
 
 
 app = FastAPI(
-    title="SEC 10-Q / 10-K / 6-K Analyzer API",
+    title="SEC Filing Analyzer API",
     version="1.0.0"
 )
 
@@ -29,6 +37,7 @@ EARNINGS_CACHE_TTL_S = int(os.getenv("EARNINGS_CACHE_TTL_S", "21600"))
 ANALYZE_CACHE_TTL_S = int(os.getenv("ANALYZE_CACHE_TTL_S", "43200"))
 
 _earnings_cache: TTLCache[list[dict[str, Any]]] = TTLCache()
+_earnings_last_success: list[dict[str, Any]] | None = None
 _analyze_cache: TTLCache[dict[str, Any]] = TTLCache()
 
 raw_origins = os.getenv("ALLOWED_ORIGINS", "")
@@ -101,6 +110,21 @@ async def analyze(
         _analyze_cache.set(cache_key, response_payload, ANALYZE_CACHE_TTL_S)
         return response_payload
 
+    except ValueError as e:
+        message = str(e)
+        if "Could not find any filings" in message or "Could not find filing for" in message:
+            return _error_response(
+                status_code=404,
+                code="not_found",
+                message="해당 보고서를 찾을 수 없습니다",
+                details=message,
+            )
+        return _error_response(
+            status_code=500,
+            code="internal_error",
+            message="Analysis failed",
+            details=message,
+        )
     except Exception as e:
         return _error_response(
             status_code=500,
@@ -127,6 +151,7 @@ async def health():
     responses={500: {"model": ApiError}},
 )
 async def earnings():
+    global _earnings_last_success
     cache_key = "earnings"
     cached_payload = _earnings_cache.get(cache_key)
     if cached_payload is not None:
@@ -141,10 +166,15 @@ async def earnings():
         else:
             payload = get_marketbeat_earnings() or []
         _earnings_cache.set(cache_key, payload, EARNINGS_CACHE_TTL_S)
+        _earnings_last_success = payload
         return payload
     except Exception as e:
         print(f"[earnings] fetch_failed error={type(e).__name__}: {e}")
         error_ttl_s = int(os.getenv("EARNINGS_ERROR_TTL_S", "300"))
+        if _earnings_last_success is not None:
+            _earnings_cache.set(cache_key, _earnings_last_success, error_ttl_s)
+            print(f"[cache] kind=earnings cache_set=last_success ttl_s={error_ttl_s} key={cache_key}")
+            return _earnings_last_success
         payload: list[dict[str, Any]] = []
         _earnings_cache.set(cache_key, payload, error_ttl_s)
         print(f"[cache] kind=earnings cache_set=error ttl_s={error_ttl_s} key={cache_key}")
@@ -174,14 +204,16 @@ def _normalize_ticker(ticker: str) -> str:
 
 def _normalize_form(form: str) -> str:
     normalized = form.strip()
-    if normalized not in {"10-Q", "10-K", "6-K"}:
-        raise ValueError("Form must be 10-Q, 10-K, or 6-K")
+    if normalized not in {"10-Q", "10-K", "6-K", "8-K", "20-F"}:
+        raise ValueError("Form must be 10-Q, 10-K, 6-K, 8-K, or 20-F")
     return normalized
 
 
 def _build_analyze_response_model(schema: dict[str, Any], ticker: str, form: str) -> AnalyzeResponse:
     meta = schema.get("meta") or {}
     tables = schema.get("tables") or {}
+    metrics = schema.get("metrics") or {}
+    sections = schema.get("sections") or {}
 
     response_meta = AnalyzeMeta(
         company_name=meta.get("company_name"),
@@ -196,8 +228,15 @@ def _build_analyze_response_model(schema: dict[str, Any], ticker: str, form: str
         balance_sheet=tables.get("balance_sheet"),
         cash_flow=tables.get("cash_flow"),
     )
+    response_metrics = AnalyzeMetrics(**metrics) if metrics else None
+    response_sections = AnalyzeSections(**sections) if sections else None
 
-    response = AnalyzeResponse(meta=response_meta, tables=response_tables)
+    response = AnalyzeResponse(
+        meta=response_meta,
+        metrics=response_metrics,
+        sections=response_sections,
+        tables=response_tables,
+    )
     last_updated = _last_updated_if_today(schema.get("last_updated"))
     if last_updated:
         response.last_updated = last_updated

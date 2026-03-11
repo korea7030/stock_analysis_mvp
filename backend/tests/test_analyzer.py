@@ -29,7 +29,7 @@ def test_schema_shape(monkeypatch: pytest.MonkeyPatch) -> None:
     meta = cast(dict[str, Any], result["meta"])
     tables = cast(dict[str, Any], result["tables"])
 
-    assert set(result.keys()) == {"meta", "tables", "last_updated"}
+    assert set(result.keys()) == {"meta", "metrics", "sections", "tables", "last_updated"}
     assert meta["ticker"] == "AAPL"
     assert meta["report_type"] == "10-K"
     assert tables["income_statement"]
