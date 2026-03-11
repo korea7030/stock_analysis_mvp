@@ -209,7 +209,14 @@ def extract_meta(html, ticker, form):
         elif "documentperiodenddate" in nm:
             period_end = tag.get_text(strip=True)
 
-    unit = "(in millions)" if "(in millions" in html.lower() else None
+    lower_html = html.lower()
+    unit = None
+    if "(in millions" in lower_html:
+        unit = "(in millions)"
+    elif "(in thousands" in lower_html:
+        unit = "(in thousands)"
+    elif "(in billions" in lower_html:
+        unit = "(in billions)"
 
     return {
         "company_name": company,
@@ -218,6 +225,8 @@ def extract_meta(html, ticker, form):
         "period_end": period_end,
         "filing_date": None,
         "unit": unit,
+        "accession_number": None,
+        "source_url": None,
     }
 
 
@@ -417,7 +426,12 @@ def _diff_text(prev: str | None, curr: str | None) -> str | None:
     return "\n".join(diff_lines[:200])
 
 
-def extract_sections(html: str, form: str, ticker: str) -> dict[str, str | None]:
+def extract_sections(
+    html: str,
+    form: str,
+    ticker: str,
+    meta: dict | None = None,
+) -> dict[str, str | None]:
     soup = BeautifulSoup(html, "lxml")
     text = soup.get_text("\n")
     text = _normalize_text_block(text)
@@ -436,7 +450,26 @@ def extract_sections(html: str, form: str, ticker: str) -> dict[str, str | None]
         "mdna": mdna or "",
         "risk_factors": risk or "",
     }
-    save_section_history(ticker=ticker, form=form, mdna=mdna or "", risk_factors=risk or "")
+    if mdna or risk:
+        accession_number = None
+        filing_date = None
+        period_end = None
+        source_url = None
+        if isinstance(meta, dict):
+            accession_number = meta.get("accession_number")
+            filing_date = meta.get("filing_date")
+            period_end = meta.get("period_end")
+            source_url = meta.get("source_url")
+        save_section_history(
+            ticker=ticker,
+            form=form,
+            mdna=mdna or "",
+            risk_factors=risk or "",
+            accession_number=accession_number,
+            filing_date=filing_date,
+            period_end=period_end,
+            source_url=source_url,
+        )
 
     return {
         "mdna": mdna,
@@ -474,7 +507,7 @@ def run_analysis(ticker: str, form: str = "10-Q"):
     if source_url:
         schema["meta"]["source_url"] = source_url
     schema["metrics"] = extract_metrics(income_html, balance_html, cashflow_html)
-    schema["sections"] = extract_sections(html, form, ticker)
+    schema["sections"] = extract_sections(html, form, ticker, schema.get("meta"))
     schema["tables"] = {
         "income_statement": income_html,
         "balance_sheet": balance_html,
