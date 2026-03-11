@@ -4,3 +4,7 @@ test.html
 **/.next
 **/__pycache__/**
 frontend/.env.local
+.dockerignore
+AGENTS.md
+.sisyphus/
+frontend/out/
