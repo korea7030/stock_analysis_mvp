@@ -41,3 +41,32 @@ def save_to_mongo(schema: dict):
         print("[Mongo] Saved")
     except Exception as e:
         print("[Mongo ERROR]", e)
+
+
+def load_section_history(*, ticker: str, form: str) -> dict | None:
+    if col is None:
+        return None
+    try:
+        doc = col.find_one({"kind": "sections", "ticker": ticker, "form": form})
+        if not doc:
+            return None
+        return {
+            "mdna": doc.get("mdna") or "",
+            "risk_factors": doc.get("risk_factors") or "",
+        }
+    except Exception as e:
+        print("[Mongo ERROR]", e)
+        return None
+
+
+def save_section_history(*, ticker: str, form: str, mdna: str, risk_factors: str) -> None:
+    if col is None:
+        return
+    try:
+        col.update_one(
+            {"kind": "sections", "ticker": ticker, "form": form},
+            {"$set": {"mdna": mdna, "risk_factors": risk_factors}},
+            upsert=True,
+        )
+    except Exception as e:
+        print("[Mongo ERROR]", e)

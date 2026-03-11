@@ -1,4 +1,5 @@
 import difflib
+import os
 import re
 import warnings
 from datetime import datetime
@@ -6,7 +7,14 @@ from datetime import datetime
 from bs4 import BeautifulSoup, XMLParsedAsHTMLWarning
 from sec_downloader import Downloader
 
-from backend.clients import marketbeat_get_weekly_earnings, sec_get_filing_html
+from backend.clients import (
+    marketbeat_get_weekly_earnings,
+    sec_download_filing_url,
+    sec_get_exhibit_urls,
+    sec_get_filing_html,
+    sec_get_filing_metadatas,
+)
+from backend.mongo import load_section_history, save_section_history
 
 warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
 
@@ -24,6 +32,8 @@ def init_schema():
             "period_end": None,
             "filing_date": None,
             "unit": None,
+            "accession_number": None,
+            "source_url": None,
         },
         "metrics": {},
         "sections": {},
@@ -146,6 +156,8 @@ def classify_table(table) -> str | None:
 
     if any(k in text for k in [
         "total assets",
+        "statement of financial position",
+        "balance sheet",
         "liabilities and equity",
         "liabilities and shareholders",
         "stockholders’ equity",
@@ -154,6 +166,9 @@ def classify_table(table) -> str | None:
         return "balance_sheet"
 
     if any(k in text for k in [
+        "statements of cash flows",
+        "statement of cash flows",
+        "cash flows",
         "net cash provided",
         "operating activities",
         "investing activities",
@@ -162,6 +177,10 @@ def classify_table(table) -> str | None:
         return "cash_flow"
 
     if any(k in text for k in [
+        "statements of operations",
+        "statement of operations",
+        "income statement",
+        "statements of income",
         "net sales",
         "revenue",
         "gross margin",
@@ -269,21 +288,58 @@ def _metric_payload(values: list[float]) -> dict[str, float | None]:
 
 
 def extract_metrics(income_html: str | None, balance_html: str | None, cashflow_html: str | None) -> dict:
-    revenue_vals = _find_row_values(income_html, ["revenue", "net sales", "total net sales", "sales"])
+    revenue_vals = _find_row_values(
+        income_html,
+        [
+            "total revenue",
+            "revenue",
+            "net sales",
+            "total net sales",
+            "sales",
+            "turnover",
+        ],
+    )
     gross_profit_vals = _find_row_values(income_html, ["gross profit", "gross margin"])
-    operating_income_vals = _find_row_values(income_html, ["operating income", "income from operations"])
-    net_income_vals = _find_row_values(income_html, ["net income", "net earnings", "net loss"])
-    eps_vals = _find_row_values(income_html, ["earnings per share", "eps"])
+    operating_income_vals = _find_row_values(
+        income_html,
+        [
+            "operating income",
+            "income from operations",
+            "operating profit",
+        ],
+    )
+    net_income_vals = _find_row_values(
+        income_html,
+        [
+            "net income",
+            "net earnings",
+            "net loss",
+            "profit for the period",
+            "loss for the period",
+            "profit attributable",
+            "loss attributable",
+        ],
+    )
+    eps_vals = _find_row_values(income_html, ["earnings per share", "basic earnings per share", "eps"])
 
     cash_vals = _find_row_values(balance_html, ["cash and cash equivalents", "cash equivalents", "cash"])
     assets_vals = _find_row_values(balance_html, ["total assets"])
     liabilities_vals = _find_row_values(balance_html, ["total liabilities"])
     equity_vals = _find_row_values(balance_html, ["total shareholders' equity", "stockholders' equity", "total equity"])
-    debt_vals = _find_row_values(balance_html, ["long-term debt", "long term debt", "longterm debt"])
+    debt_vals = _find_row_values(
+        balance_html,
+        [
+            "long-term debt",
+            "long term debt",
+            "longterm debt",
+            "borrowings",
+        ],
+    )
 
     cfo_vals = _find_row_values(cashflow_html, [
         "net cash provided by operating activities",
         "net cash from operating activities",
+        "net cash used in operating activities",
         "operating activities",
     ])
     capex_vals = _find_row_values(cashflow_html, [
@@ -373,13 +429,14 @@ def extract_sections(html: str, form: str, ticker: str) -> dict[str, str | None]
     risk = _extract_section(text, risk_patterns)
 
     key = f"{form}:{ticker}"
-    prev = _SECTION_HISTORY.get(key, {})
+    prev = load_section_history(ticker=ticker, form=form) or _SECTION_HISTORY.get(key, {})
     mdna_diff = _diff_text(prev.get("mdna"), mdna)
     risk_diff = _diff_text(prev.get("risk_factors"), risk)
     _SECTION_HISTORY[key] = {
         "mdna": mdna or "",
         "risk_factors": risk or "",
     }
+    save_section_history(ticker=ticker, form=form, mdna=mdna or "", risk_factors=risk or "")
 
     return {
         "mdna": mdna,
@@ -399,7 +456,7 @@ def run_analysis(ticker: str, form: str = "10-Q"):
         email_address="korea7030.jhl@gmail.com"
     )
     
-    html = sec_get_filing_html(dl, ticker=ticker, form=form)
+    html, filing_meta, source_url = _get_best_filing_html(dl, ticker=ticker, form=form)
         
     # with open('test.html', 'w') as f:
     #     f.write(html)
@@ -411,6 +468,11 @@ def run_analysis(ticker: str, form: str = "10-Q"):
 
     schema = init_schema()
     schema["meta"] = extract_meta(html, ticker, form)
+    if filing_meta is not None:
+        schema["meta"]["filing_date"] = getattr(filing_meta, "filing_date", None)
+        schema["meta"]["accession_number"] = getattr(filing_meta, "accession_number", None)
+    if source_url:
+        schema["meta"]["source_url"] = source_url
     schema["metrics"] = extract_metrics(income_html, balance_html, cashflow_html)
     schema["sections"] = extract_sections(html, form, ticker)
     schema["tables"] = {
@@ -420,6 +482,50 @@ def run_analysis(ticker: str, form: str = "10-Q"):
     }
 
     return schema
+
+
+def _get_best_filing_html(
+    dl: object,
+    *,
+    ticker: str,
+    form: str,
+) -> tuple[str, object | None, str | None]:
+    # For 6-K/8-K, the latest filing is often non-financial. Try multiple recent filings and exhibits.
+    if form not in {"6-K", "8-K"}:
+        return sec_get_filing_html(dl, ticker=ticker, form=form), None, None
+
+    max_filings = int(os.getenv("SEC_MAX_FILINGS", "5"))
+    metadatas = sec_get_filing_metadatas(dl, ticker=ticker, form=form, limit=max_filings)
+    for meta in metadatas:
+        cik = str(getattr(meta, "cik", "") or "")
+        accession = str(getattr(meta, "accession_number", "") or "")
+        primary = str(getattr(meta, "primary_doc_url", "") or "")
+
+        urls: list[str] = []
+        if cik and accession:
+            urls.extend(sec_get_exhibit_urls(cik=cik, accession_number=accession))
+        if primary:
+            urls.append(primary)
+
+        # De-dupe while preserving order
+        urls = list(dict.fromkeys(urls))
+
+        for url in urls:
+            try:
+                html = sec_download_filing_url(dl, url=url)
+            except Exception:
+                continue
+
+            income_html, balance_html, cashflow_html = extract_raw_tables(html)
+            if income_html or balance_html or cashflow_html:
+                return html, meta, url
+
+    # Fall back to latest single filing; API layer will handle "no_financial_data" if needed.
+    return (
+        sec_get_filing_html(dl, ticker=ticker, form=form),
+        metadatas[0] if metadatas else None,
+        None,
+    )
 
 
 def get_marketbeat_earnings():
