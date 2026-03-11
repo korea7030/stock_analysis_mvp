@@ -229,7 +229,7 @@ export default function Dashboard() {
 
       {error && (
         <div className="bg-red-50 text-red-700 border border-red-200 rounded p-3 text-sm">
-          Error: {error}
+          {error}
         </div>
       )}
 
@@ -245,6 +245,23 @@ export default function Dashboard() {
               {data.meta.report_type} · Period End: {data.meta.period_end} ·
               Unit: {data.meta.unit}
             </p>
+            {(data.meta.filing_date || data.meta.accession_number) && (
+              <p className="mt-1 text-xs text-gray-500">
+                Filing: {data.meta.filing_date || "-"} · Accession: {data.meta.accession_number || "-"}
+              </p>
+            )}
+            {data.meta.source_url && (
+              <p className="mt-1 text-xs">
+                <a
+                  className="text-blue-600 hover:underline"
+                  href={data.meta.source_url}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Source document
+                </a>
+              </p>
+            )}
             <p className="mt-1 text-xs text-gray-400">
               Last updated: {data.last_updated}
             </p>

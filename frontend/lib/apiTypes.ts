@@ -7,6 +7,8 @@ export type AnalyzeMeta = {
   period_end?: string | null;
   filing_date?: string | null;
   unit?: string | null;
+  accession_number?: string | null;
+  source_url?: string | null;
 };
 
 export type AnalyzeTables = {
