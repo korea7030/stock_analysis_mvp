@@ -17,6 +17,7 @@ export default function Dashboard() {
   const defaultApiBase =
     process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
   const [apiBaseUrl, setApiBaseUrl] = useState(defaultApiBase);
+  const localFallbackBase = "http://localhost:8000";
 
   const normalizeBaseUrl = (value: string) =>
     value.endsWith("/") ? value.slice(0, -1) : value;
@@ -33,8 +34,14 @@ export default function Dashboard() {
         if (!response.ok) return;
         const payload = (await response.json()) as { apiBaseUrl?: string };
         const nextBase = payload.apiBaseUrl?.trim();
-        if (active && nextBase && isValidBaseUrl(nextBase)) {
-          setApiBaseUrl(normalizeBaseUrl(nextBase));
+        const isLocalhost =
+          typeof window !== "undefined" &&
+          (window.location.hostname === "localhost" ||
+            window.location.hostname === "127.0.0.1");
+        const envOverride = process.env.NEXT_PUBLIC_API_BASE_URL?.trim();
+        const resolvedBase = isLocalhost && !envOverride ? localFallbackBase : nextBase;
+        if (active && resolvedBase && isValidBaseUrl(resolvedBase)) {
+          setApiBaseUrl(normalizeBaseUrl(resolvedBase));
         }
       } catch (err) {
         if (process.env.NODE_ENV !== "production") {
@@ -92,7 +99,7 @@ export default function Dashboard() {
 
   return (
     <div className="max-w-7xl mx-auto p-6 space-y-6">
-      <h1 className="text-3xl font-bold">10-Q / 6-K Financial Dashboard</h1>
+      <h1 className="text-3xl font-bold">10-Q / 10-K / 6-K Financial Dashboard</h1>
 
       {/* 입력 영역 */}
       <div className="bg-white rounded-xl shadow p-4 flex flex-wrap gap-4 items-center">
@@ -135,6 +142,14 @@ export default function Dashboard() {
                 onChange={() => setForm("10-Q")}
               />
               10-Q
+            </label>
+            <label className="flex gap-1 items-center text-sm">
+              <input
+                type="radio"
+                checked={form === "10-K"}
+                onChange={() => setForm("10-K")}
+              />
+              10-K
             </label>
             <label className="flex gap-1 items-center text-sm">
               <input
@@ -218,6 +233,13 @@ export default function Dashboard() {
             td, th {
               padding: 4px 6px;
               font-size: 11px;
+            }
+            .numeric-cell {
+              white-space: nowrap;
+            }
+            .numeric-cell * {
+              display: inline;
+              white-space: nowrap;
             }
             tr:hover {
               background-color: #fafafa;

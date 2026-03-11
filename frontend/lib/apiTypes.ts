@@ -1,4 +1,4 @@
-export type FilingForm = "10-Q" | "6-K";
+export type FilingForm = "10-Q" | "10-K" | "6-K";
 
 export type AnalyzeMeta = {
   company_name?: string | null;
