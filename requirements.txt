@@ -16,7 +16,7 @@ pdfminer.six
 pdfplumber
 pillow
 pycparser
-pymongo
+psycopg[binary]
 PyMuPDF
 pypdfium2
 pyrate-limiter
