@@ -3,7 +3,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "Financial Dashboard",
-  description: "10-Q / 10-K / 6-K Analyzer",
+  description: "SEC Filing Analyzer",
 };
 
 export default function RootLayout({

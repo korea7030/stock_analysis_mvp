@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import DOMPurify from "dompurify";
 
-import type { AnalyzeResponse, FilingForm } from "@/lib/apiTypes";
+import type { AnalyzeResponse, FilingForm, MetricValue } from "@/lib/apiTypes";
 import { annotateTableHTML } from "@/lib/filingTables";
 
 export default function Dashboard() {
@@ -75,7 +75,22 @@ export default function Dashboard() {
       const res = await fetch(
         `${baseUrl}/analyze?ticker=${encodedTicker}&form=${encodedForm}`
       );
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) {
+        let errorMessage = "요청에 실패했습니다";
+        if (res.status === 404) {
+          errorMessage = "해당 보고서를 찾을 수 없습니다";
+        } else {
+          try {
+            const payload = (await res.json()) as { message?: string };
+            if (payload?.message) {
+              errorMessage = payload.message;
+            }
+          } catch {
+            errorMessage = `HTTP ${res.status}`;
+          }
+        }
+        throw new Error(errorMessage);
+      }
       const json: AnalyzeResponse = await res.json();
       setData(json);
     } catch (e) {
@@ -85,6 +100,31 @@ export default function Dashboard() {
       setLoading(false);
     }
   }
+
+  const formatNumber = (value: number | null | undefined) => {
+    if (value == null) return "-";
+    return Number(value).toLocaleString();
+  };
+
+  const formatPct = (value: number | null | undefined) => {
+    if (value == null) return "N/A";
+    const sign = value > 0 ? "+" : value < 0 ? "" : "";
+    return `${sign}${value.toFixed(1)}%`;
+  };
+
+  const renderMetricRow = (label: string, metric?: MetricValue | null) => {
+    const current = metric?.current ?? null;
+    const previous = metric?.previous ?? null;
+    const change = metric?.change_pct ?? null;
+    return (
+      <tr key={label}>
+        <td className="text-left font-medium">{label}</td>
+        <td className="text-right">{formatNumber(current)}</td>
+        <td className="text-right">{formatNumber(previous)}</td>
+        <td className="text-right">{formatPct(change)}</td>
+      </tr>
+    );
+  };
 
   // ---------------- 공통 유틸 ----------------
 
@@ -99,7 +139,7 @@ export default function Dashboard() {
 
   return (
     <div className="max-w-7xl mx-auto p-6 space-y-6">
-      <h1 className="text-3xl font-bold">10-Q / 10-K / 6-K Financial Dashboard</h1>
+      <h1 className="text-3xl font-bold">SEC Filing Dashboard</h1>
 
       {/* 입력 영역 */}
       <div className="bg-white rounded-xl shadow p-4 flex flex-wrap gap-4 items-center">
@@ -134,7 +174,7 @@ export default function Dashboard() {
 
         <div className="flex flex-col">
           <span className="text-xs text-gray-500 mb-1">Form</span>
-          <div className="flex gap-4 items-center">
+          <div className="flex flex-wrap gap-4 items-center">
             <label className="flex gap-1 items-center text-sm">
               <input
                 type="radio"
@@ -158,6 +198,22 @@ export default function Dashboard() {
                 onChange={() => setForm("6-K")}
               />
               6-K
+            </label>
+            <label className="flex gap-1 items-center text-sm">
+              <input
+                type="radio"
+                checked={form === "8-K"}
+                onChange={() => setForm("8-K")}
+              />
+              8-K
+            </label>
+            <label className="flex gap-1 items-center text-sm">
+              <input
+                type="radio"
+                checked={form === "20-F"}
+                onChange={() => setForm("20-F")}
+              />
+              20-F
             </label>
           </div>
         </div>
@@ -193,6 +249,70 @@ export default function Dashboard() {
               Last updated: {data.last_updated}
             </p>
           </div>
+
+          {data.metrics && (
+            <div className="bg-white rounded-xl shadow p-5 overflow-x-auto">
+              <h2 className="text-xl font-semibold mb-3">Key Metrics</h2>
+              <table>
+                <thead>
+                  <tr>
+                    <th className="text-left">Metric</th>
+                    <th className="text-right">Current</th>
+                    <th className="text-right">Previous</th>
+                    <th className="text-right">Change</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {renderMetricRow("Revenue", data.metrics.revenue)}
+                  {renderMetricRow("Gross Profit", data.metrics.gross_profit)}
+                  {renderMetricRow("Operating Income", data.metrics.operating_income)}
+                  {renderMetricRow("Net Income", data.metrics.net_income)}
+                  {renderMetricRow("EPS (Basic)", data.metrics.eps_basic)}
+                  {renderMetricRow("Cash & Equivalents", data.metrics.cash_and_equivalents)}
+                  {renderMetricRow("Total Assets", data.metrics.total_assets)}
+                  {renderMetricRow("Total Liabilities", data.metrics.total_liabilities)}
+                  {renderMetricRow("Total Equity", data.metrics.total_equity)}
+                  {renderMetricRow("Long-term Debt", data.metrics.long_term_debt)}
+                  {renderMetricRow("Operating Cash Flow", data.metrics.operating_cash_flow)}
+                  {renderMetricRow("Capex", data.metrics.capex)}
+                  {renderMetricRow("Free Cash Flow", data.metrics.free_cash_flow)}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {data.sections && (
+            <div className="bg-white rounded-xl shadow p-5 space-y-4">
+              <div>
+                <h2 className="text-xl font-semibold mb-2">MD&A</h2>
+                <pre className="whitespace-pre-wrap text-xs text-gray-700">
+                  {data.sections.mdna || "No section found."}
+                </pre>
+                {data.sections.mdna_diff && (
+                  <details className="mt-2">
+                    <summary className="text-xs text-gray-500 cursor-pointer">Show diff</summary>
+                    <pre className="whitespace-pre-wrap text-xs text-gray-600 mt-2">
+                      {data.sections.mdna_diff}
+                    </pre>
+                  </details>
+                )}
+              </div>
+              <div>
+                <h2 className="text-xl font-semibold mb-2">Risk Factors</h2>
+                <pre className="whitespace-pre-wrap text-xs text-gray-700">
+                  {data.sections.risk_factors || "No section found."}
+                </pre>
+                {data.sections.risk_factors_diff && (
+                  <details className="mt-2">
+                    <summary className="text-xs text-gray-500 cursor-pointer">Show diff</summary>
+                    <pre className="whitespace-pre-wrap text-xs text-gray-600 mt-2">
+                      {data.sections.risk_factors_diff}
+                    </pre>
+                  </details>
+                )}
+              </div>
+            </div>
+          )}
 
           {/* 뱃지 + 기본 스타일 */}
           <style>{`
