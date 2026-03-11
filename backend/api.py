@@ -64,7 +64,7 @@ app.add_middleware(
     "/analyze",
     response_model=AnalyzeResponse,
     response_model_exclude_none=True,
-    responses={422: {"model": ApiError}, 500: {"model": ApiError}},
+    responses={404: {"model": ApiError}, 422: {"model": ApiError}, 500: {"model": ApiError}},
 )
 async def analyze(
     ticker: str = Query(...),
@@ -236,6 +236,8 @@ def _build_analyze_response_model(schema: dict[str, Any], ticker: str, form: str
         period_end=meta.get("period_end"),
         filing_date=meta.get("filing_date"),
         unit=meta.get("unit"),
+        accession_number=meta.get("accession_number"),
+        source_url=meta.get("source_url"),
     )
     response_tables = AnalyzeTables(
         income_statement=tables.get("income_statement"),

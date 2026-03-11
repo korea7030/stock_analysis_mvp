@@ -12,6 +12,8 @@ class AnalyzeMeta(BaseModel):
     period_end: Optional[str] = None
     filing_date: Optional[str] = None
     unit: Optional[str] = None
+    accession_number: Optional[str] = None
+    source_url: Optional[str] = None
 
 
 class AnalyzeTables(BaseModel):
