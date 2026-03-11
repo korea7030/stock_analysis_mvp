@@ -20,7 +20,7 @@ except ImportError:
 
 
 app = FastAPI(
-    title="SEC 10-Q / 6-K Analyzer API",
+    title="SEC 10-Q / 10-K / 6-K Analyzer API",
     version="1.0.0"
 )
 
@@ -174,8 +174,8 @@ def _normalize_ticker(ticker: str) -> str:
 
 def _normalize_form(form: str) -> str:
     normalized = form.strip()
-    if normalized not in {"10-Q", "6-K"}:
-        raise ValueError("Form must be 10-Q or 6-K")
+    if normalized not in {"10-Q", "10-K", "6-K"}:
+        raise ValueError("Form must be 10-Q, 10-K, or 6-K")
     return normalized
 
 

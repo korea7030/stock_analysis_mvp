@@ -25,13 +25,13 @@ def test_schema_shape(monkeypatch: pytest.MonkeyPatch) -> None:
         _fake_sec_html,
     )
 
-    result = cast(dict[str, Any], run_analysis("AAPL", "10-Q"))
+    result = cast(dict[str, Any], run_analysis("AAPL", "10-K"))
     meta = cast(dict[str, Any], result["meta"])
     tables = cast(dict[str, Any], result["tables"])
 
     assert set(result.keys()) == {"meta", "tables", "last_updated"}
     assert meta["ticker"] == "AAPL"
-    assert meta["report_type"] == "10-Q"
+    assert meta["report_type"] == "10-K"
     assert tables["income_statement"]
     assert tables["balance_sheet"]
     assert tables["cash_flow"]
