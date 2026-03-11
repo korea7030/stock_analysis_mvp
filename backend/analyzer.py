@@ -5,6 +5,8 @@ from datetime import datetime
 from bs4 import BeautifulSoup, XMLParsedAsHTMLWarning
 from sec_downloader import Downloader
 
+from backend.clients import marketbeat_get_weekly_earnings, sec_get_filing_html
+
 warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
 
 
@@ -226,10 +228,8 @@ def run_analysis(ticker: str, form: str = "10-Q"):
         company_name="Stock Analysis MVP",
         email_address="korea7030.jhl@gmail.com"
     )
-
-    html = dl.get_filing_html(ticker=ticker, form=form)
-    if isinstance(html, bytes):
-        html = html.decode("utf-8", errors="ignore")
+    
+    html = sec_get_filing_html(dl, ticker=ticker, form=form)
         
     # with open('test.html', 'w') as f:
     #     f.write(html)
@@ -248,3 +248,7 @@ def run_analysis(ticker: str, form: str = "10-Q"):
     }
 
     return schema
+
+
+def get_marketbeat_earnings():
+    return marketbeat_get_weekly_earnings()
