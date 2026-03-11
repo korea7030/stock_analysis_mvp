@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 
 from backend.analyzer import run_analysis   # 수정된 analyzer (원본 표 HTML 포함)
-from backend.mongo import save_to_mongo     # 기존 MongoDB 저장 함수
+ 
 from backend.cache import TTLCache
 from backend.models import (
     AnalyzeMeta,
@@ -104,12 +104,6 @@ async def analyze(
 
     try:
         schema = run_analysis(normalized_ticker, normalized_form)
-
-        # DB 저장은 실패해도 API 실패로 처리하지 않음
-        try:
-            save_to_mongo(schema)
-        except Exception as db_err:
-            print("[Mongo Error]", db_err)
 
         response_model = _build_analyze_response_model(schema, normalized_ticker, normalized_form)
         response_payload = _model_to_dict(response_model)

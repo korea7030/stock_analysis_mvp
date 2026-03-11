@@ -14,7 +14,7 @@ from backend.clients import (
     sec_get_filing_html,
     sec_get_filing_metadatas,
 )
-from backend.mongo import load_section_history, save_section_history
+from backend.postgres_store import load_section_history, save_section_history
 
 warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
 
