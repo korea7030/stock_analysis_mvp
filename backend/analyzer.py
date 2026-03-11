@@ -133,8 +133,16 @@ def classify_table(table) -> str | None:
 
     # 🔥 숫자 없는 테이블 제거 (TOC 방지)
     numeric_tags = table.find_all("ix:nonfraction")
-    if len(numeric_tags) < 4:
-        return None
+    has_inline_xbrl = len(numeric_tags) >= 4
+    if not has_inline_xbrl:
+        numeric_like = 0
+        for td in table.find_all("td"):
+            if parse_number(td.get_text(" ", strip=True)) is not None:
+                numeric_like += 1
+                if numeric_like >= 6:
+                    break
+        if numeric_like < 6:
+            return None
 
     if any(k in text for k in [
         "total assets",
