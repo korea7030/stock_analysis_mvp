@@ -135,6 +135,38 @@ def sec_get_exhibit_urls(*, cik: str, accession_number: str) -> list[str]:
 
     items = (cached.get("directory") or {}).get("item") or []
     ranked: list[tuple[int, str]] = []
+    positive_keywords = [
+        "press",
+        "release",
+        "earn",
+        "result",
+        "financial",
+        "statement",
+        "operations",
+        "income",
+        "cash",
+        "mda",
+        "mdaq",
+        "interim",
+        "quarter",
+        "q1",
+        "q2",
+        "q3",
+        "q4",
+        "fy",
+    ]
+    negative_keywords = [
+        "executive",
+        "director",
+        "share",
+        "dealing",
+        "transaction",
+        "notice",
+        "proxy",
+        "govern",
+        "compliance",
+        "signature",
+    ]
     for it in items:
         name = str(it.get("name") or "")
         if not name:
@@ -154,6 +186,10 @@ def sec_get_exhibit_urls(*, cik: str, accession_number: str) -> list[str]:
             score = size
             if is_ex99:
                 score += 1_000_000
+            if any(k in lower for k in positive_keywords):
+                score += 250_000
+            if any(k in lower for k in negative_keywords):
+                score -= 500_000
             ranked.append((score, name))
 
     ranked.sort(reverse=True)
