@@ -59,3 +59,41 @@ def test_annotate_income_missing_cells_no_crash(monkeypatch: pytest.MonkeyPatch)
     result = cast(dict[str, Any], run_analysis("AAPL", "10-Q"))
     tables = cast(dict[str, Any], result["tables"])
     assert tables["income_statement"]
+
+
+def test_toc_then_income_selects_real_income_statement(monkeypatch: pytest.MonkeyPatch) -> None:
+    fixture_html = _read_fixture("toc_then_income.html")
+
+    def _fake_sec_html(*_args: object, **_kwargs: object) -> str:
+        return fixture_html
+
+    monkeypatch.setattr(
+        "backend.analyzer.sec_get_filing_html",
+        _fake_sec_html,
+    )
+
+    result = cast(dict[str, Any], run_analysis("AAPL", "10-K"))
+    tables = cast(dict[str, Any], result["tables"])
+
+    income_html = tables.get("income_statement")
+    assert income_html
+    lowered = str(income_html).lower()
+    assert "revenue" in lowered
+    assert "net income" in lowered
+    assert "table of contents" not in lowered
+
+
+def test_toc_only_does_not_select_income_statement(monkeypatch: pytest.MonkeyPatch) -> None:
+    fixture_html = _read_fixture("toc_only.html")
+
+    def _fake_sec_html(*_args: object, **_kwargs: object) -> str:
+        return fixture_html
+
+    monkeypatch.setattr(
+        "backend.analyzer.sec_get_filing_html",
+        _fake_sec_html,
+    )
+
+    result = cast(dict[str, Any], run_analysis("AAPL", "10-K"))
+    tables = cast(dict[str, Any], result["tables"])
+    assert tables.get("income_statement") is None
