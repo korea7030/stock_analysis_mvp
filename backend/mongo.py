@@ -15,7 +15,14 @@ col = None
 # MongoDB 연결을 시도하지만 실패해도 그냥 넘어감
 try:
     if MONGO_URI and MONGO_DB and MONGO_COL:
-        client = MongoClient(MONGO_URI)
+        client = MongoClient(
+            MONGO_URI,
+            serverSelectionTimeoutMS=2000,
+            connectTimeoutMS=2000,
+            socketTimeoutMS=2000,
+        )
+        # Force a quick connectivity check
+        client.admin.command("ping")
         col = client[MONGO_DB][MONGO_COL]
         print("[Mongo] Connected")
     else:
@@ -53,19 +60,42 @@ def load_section_history(*, ticker: str, form: str) -> dict | None:
         return {
             "mdna": doc.get("mdna") or "",
             "risk_factors": doc.get("risk_factors") or "",
+            "accession_number": doc.get("accession_number"),
+            "filing_date": doc.get("filing_date"),
+            "period_end": doc.get("period_end"),
+            "source_url": doc.get("source_url"),
         }
     except Exception as e:
         print("[Mongo ERROR]", e)
         return None
 
 
-def save_section_history(*, ticker: str, form: str, mdna: str, risk_factors: str) -> None:
+def save_section_history(
+    *,
+    ticker: str,
+    form: str,
+    mdna: str,
+    risk_factors: str,
+    accession_number: str | None = None,
+    filing_date: str | None = None,
+    period_end: str | None = None,
+    source_url: str | None = None,
+) -> None:
     if col is None:
         return
     try:
         col.update_one(
             {"kind": "sections", "ticker": ticker, "form": form},
-            {"$set": {"mdna": mdna, "risk_factors": risk_factors}},
+            {
+                "$set": {
+                    "mdna": mdna,
+                    "risk_factors": risk_factors,
+                    "accession_number": accession_number,
+                    "filing_date": filing_date,
+                    "period_end": period_end,
+                    "source_url": source_url,
+                }
+            },
             upsert=True,
         )
     except Exception as e:
