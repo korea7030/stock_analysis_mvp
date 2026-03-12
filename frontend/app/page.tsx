@@ -6,6 +6,50 @@ import DOMPurify from "dompurify";
 import type { AnalyzeResponse, EarningsItem, FilingForm, MetricValue } from "@/lib/apiTypes";
 import { annotateTableHTML } from "@/lib/filingTables";
 
+const EARNINGS_PAGE_SIZE = 8;
+
+function clampPage(page: number, totalPages: number) {
+  if (totalPages <= 1) return 1;
+  return Math.min(Math.max(1, page), totalPages);
+}
+
+function Pager(props: {
+  page: number;
+  totalItems: number;
+  pageSize: number;
+  onChange: (nextPage: number) => void;
+}) {
+  const totalPages = Math.max(1, Math.ceil(props.totalItems / props.pageSize));
+  if (totalPages <= 1) return null;
+
+  const start = props.totalItems === 0 ? 0 : (props.page - 1) * props.pageSize + 1;
+  const end = Math.min(props.totalItems, props.page * props.pageSize);
+
+  return (
+    <div className="flex items-center justify-between pt-3">
+      <button
+        type="button"
+        className="h-8 px-3 rounded border text-xs disabled:opacity-50"
+        onClick={() => props.onChange(Math.max(1, props.page - 1))}
+        disabled={props.page <= 1}
+      >
+        Prev
+      </button>
+      <div className="text-xs text-slate-500">
+        {start}-{end} of {props.totalItems} · Page {props.page}/{totalPages}
+      </div>
+      <button
+        type="button"
+        className="h-8 px-3 rounded border text-xs disabled:opacity-50"
+        onClick={() => props.onChange(Math.min(totalPages, props.page + 1))}
+        disabled={props.page >= totalPages}
+      >
+        Next
+      </button>
+    </div>
+  );
+}
+
 export default function Dashboard() {
   const [ticker, setTicker] = useState("AAPL");
   const [form, setForm] = useState<FilingForm>("10-Q");
@@ -13,6 +57,8 @@ export default function Dashboard() {
   const [earnings, setEarnings] = useState<EarningsItem[] | null>(null);
   const [earningsLoading, setEarningsLoading] = useState(false);
   const [earningsError, setEarningsError] = useState<string | null>(null);
+  const [upcomingPage, setUpcomingPage] = useState(1);
+  const [reportedPage, setReportedPage] = useState(1);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [inputError, setInputError] = useState<string | null>(null);
@@ -97,8 +143,43 @@ export default function Dashboard() {
     };
   }, [apiBaseUrl]);
 
-  const upcoming = (earnings || []).filter((it) => (it.status || "").toLowerCase() !== "reported");
-  const reported = (earnings || []).filter((it) => (it.status || "").toLowerCase() === "reported");
+  const upcomingAll = (earnings || []).filter((it) => (it.status || "").toLowerCase() !== "reported");
+  const reportedAll = (earnings || []).filter((it) => (it.status || "").toLowerCase() === "reported");
+
+  const upcoming = [...upcomingAll].sort((a, b) => {
+    const ad = a.report_date || "";
+    const bd = b.report_date || "";
+    if (ad !== bd) return ad.localeCompare(bd);
+    return (a.ticker || "").localeCompare(b.ticker || "");
+  });
+
+  const reported = [...reportedAll].sort((a, b) => {
+    const ad = a.report_date || "";
+    const bd = b.report_date || "";
+    if (ad !== bd) return bd.localeCompare(ad);
+    return (a.ticker || "").localeCompare(b.ticker || "");
+  });
+
+  const upcomingTotalPages = Math.max(1, Math.ceil(upcoming.length / EARNINGS_PAGE_SIZE));
+  const reportedTotalPages = Math.max(1, Math.ceil(reported.length / EARNINGS_PAGE_SIZE));
+
+  useEffect(() => {
+    setUpcomingPage((p) => clampPage(p, upcomingTotalPages));
+  }, [upcomingTotalPages]);
+
+  useEffect(() => {
+    setReportedPage((p) => clampPage(p, reportedTotalPages));
+  }, [reportedTotalPages]);
+
+  const upcomingPageItems = upcoming.slice(
+    (upcomingPage - 1) * EARNINGS_PAGE_SIZE,
+    upcomingPage * EARNINGS_PAGE_SIZE
+  );
+
+  const reportedPageItems = reported.slice(
+    (reportedPage - 1) * EARNINGS_PAGE_SIZE,
+    reportedPage * EARNINGS_PAGE_SIZE
+  );
 
   async function analyze() {
     if (!ticker.trim()) {
@@ -305,11 +386,13 @@ export default function Dashboard() {
                 <div>
                   <div className="text-xs font-medium text-slate-500">Upcoming</div>
                   <div className="mt-2 space-y-2">
-                    {upcoming.slice(0, 8).map((it, idx) => (
+                    {upcomingPageItems.map((it, idx) => (
                       <div key={`${it.ticker || "x"}-${idx}`} className="border rounded-lg p-3">
                         <div className="flex items-center justify-between gap-2">
                           <div className="font-medium text-sm">{it.ticker || "-"}</div>
-                          <div className="text-xs text-slate-500">{it.release_time || "-"}</div>
+                          <div className="text-xs text-slate-500">
+                            {(it.report_date || "-") + " · " + (it.release_time || "TBD")}
+                          </div>
                         </div>
                         <div className="text-xs text-slate-600 mt-1 line-clamp-2">{it.company || "-"}</div>
                         <div className="flex gap-3 mt-2 text-xs">
@@ -327,16 +410,24 @@ export default function Dashboard() {
                       </div>
                     ))}
                   </div>
+                  <Pager
+                    page={upcomingPage}
+                    totalItems={upcoming.length}
+                    pageSize={EARNINGS_PAGE_SIZE}
+                    onChange={setUpcomingPage}
+                  />
                 </div>
 
                 <div>
                   <div className="text-xs font-medium text-slate-500">Reported</div>
                   <div className="mt-2 space-y-2">
-                    {reported.slice(0, 8).map((it, idx) => (
+                    {reportedPageItems.map((it, idx) => (
                       <div key={`${it.ticker || "y"}-${idx}`} className="border rounded-lg p-3 bg-slate-50">
                         <div className="flex items-center justify-between gap-2">
                           <div className="font-medium text-sm">{it.ticker || "-"}</div>
-                          <div className="text-xs text-slate-500">{it.release_time || "-"}</div>
+                          <div className="text-xs text-slate-500">
+                            {(it.report_date || "-") + " · " + (it.release_time || "TBD")}
+                          </div>
                         </div>
                         <div className="text-xs text-slate-600 mt-1 line-clamp-2">{it.company || "-"}</div>
                         <div className="grid grid-cols-2 gap-2 mt-2 text-xs text-slate-700">
@@ -358,6 +449,12 @@ export default function Dashboard() {
                       </div>
                     ))}
                   </div>
+                  <Pager
+                    page={reportedPage}
+                    totalItems={reported.length}
+                    pageSize={EARNINGS_PAGE_SIZE}
+                    onChange={setReportedPage}
+                  />
                 </div>
               </div>
             )}
