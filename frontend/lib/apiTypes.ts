@@ -63,7 +63,11 @@ export type EarningsItem = {
   revenue_estimate?: string | null;
   revenue_actual?: string | null;
   status?: string | null;
+  report_date?: string | null;
   earnings_release_url?: string | null;
   transcript_search_url?: string | null;
   source_url?: string | null;
+  source?: string | null;
+  last_year_eps?: string | null;
+  last_year_report_date?: string | null;
 };

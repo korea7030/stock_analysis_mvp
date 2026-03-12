@@ -285,12 +285,12 @@ export default function Dashboard() {
           <div className="bg-white rounded-xl shadow p-5">
             <div className="flex items-center justify-between">
               <h2 className="text-lg font-semibold">Earnings This Week</h2>
-              <a
-                className="text-xs text-slate-500 hover:underline"
-                href="https://www.marketbeat.com/earnings/weekly/"
-                target="_blank"
-                rel="noreferrer"
-              >
+                <a
+                  className="text-xs text-slate-500 hover:underline"
+                  href="https://www.nasdaq.com/market-activity/earnings"
+                  target="_blank"
+                  rel="noreferrer"
+                >
                 Source
               </a>
             </div>
