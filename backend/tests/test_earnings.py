@@ -67,7 +67,7 @@ def test_nasdaq_get_earnings_for_date_upcoming(monkeypatch):
                         {
                             "symbol": "EFGH",
                             "name": "EFGH Inc.",
-                            "time": "time-before-market-open",
+                            "time": "time-pre-market",
                             "epsForecast": "$0.50",
                             "lastYearRptDt": "3/12/2025",
                             "lastYearEPS": "$0.42",

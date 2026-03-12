@@ -303,18 +303,47 @@ def _nasdaq_headers() -> dict[str, str]:
     }
 
 
-def _nasdaq_time_label(value: str | None) -> str | None:
-    if value is None:
-        return None
-    cleaned = value.strip()
+def _nasdaq_time_label(value: str | None) -> str:
+    cleaned = value.strip() if value else ""
     if not cleaned:
-        return None
+        return "TBD"
     mapping: dict[str, str] = {
         "time-before-market-open": "Before Market Open",
+        "time-pre-market": "Before Market Open",
         "time-after-hours": "After Hours",
         "time-not-supplied": "Time Not Supplied",
     }
     return mapping.get(cleaned, cleaned)
+
+
+def _nasdaq_status(
+    *,
+    report_date: date,
+    time_code: str | None,
+    eps_actual: Any,
+    today: date | None,
+    now_et: datetime | None,
+) -> str:
+    if not _is_missing_text(eps_actual):
+        return "reported"
+    if today is None:
+        return "upcoming"
+    if report_date < today:
+        return "reported"
+    if report_date > today:
+        return "upcoming"
+    if now_et is None:
+        return "upcoming"
+
+    code = (time_code or "").strip()
+    if code in {"time-pre-market", "time-before-market-open"}:
+        deadline = now_et.replace(hour=11, minute=0, second=0, microsecond=0)
+        return "reported" if now_et >= deadline else "upcoming"
+    if code == "time-after-hours":
+        deadline = now_et.replace(hour=18, minute=0, second=0, microsecond=0)
+        return "reported" if now_et >= deadline else "upcoming"
+
+    return "upcoming"
 
 
 def _is_missing_text(value: Any) -> bool:
@@ -329,6 +358,8 @@ def _is_missing_text(value: Any) -> bool:
 def nasdaq_get_earnings_for_date(
     report_date: date,
     *,
+    today: date | None = None,
+    now_et: datetime | None = None,
     timeout_s: int = 20,
 ) -> list[dict[str, Any]]:
     date_str = report_date.isoformat()
@@ -360,7 +391,14 @@ def nasdaq_get_earnings_for_date(
             eps_estimate = row.get("epsForecast")
             eps_actual = row.get("eps")
 
-            status = "reported" if not _is_missing_text(eps_actual) else "upcoming"
+            time_code = row.get("time")
+            status = _nasdaq_status(
+                report_date=report_date,
+                time_code=str(time_code) if time_code is not None else None,
+                eps_actual=eps_actual,
+                today=today,
+                now_et=now_et,
+            )
             earnings_release_url = (
                 f"https://www.sec.gov/cgi-bin/browse-edgar?CIK={urllib.parse.quote_plus(ticker)}&type=8-K"
                 if ticker
@@ -375,7 +413,7 @@ def nasdaq_get_earnings_for_date(
                 {
                     "ticker": ticker,
                     "company": company,
-                    "release_time": _nasdaq_time_label(row.get("time")),
+                    "release_time": _nasdaq_time_label(str(time_code) if time_code is not None else None),
                     "eps_estimate": str(eps_estimate).strip() if not _is_missing_text(eps_estimate) else None,
                     "eps_actual": str(eps_actual).strip() if not _is_missing_text(eps_actual) else None,
                     "revenue_estimate": None,
@@ -409,10 +447,18 @@ def nasdaq_get_weekly_earnings(anchor_date: date | None = None) -> list[dict[str
     week_start = anchor_date - timedelta(days=anchor_date.weekday())
     days = [week_start + timedelta(days=i) for i in range(7)]
 
+    now_et: datetime | None = None
+    try:
+        from zoneinfo import ZoneInfo
+
+        now_et = datetime.now(ZoneInfo("America/New_York"))
+    except Exception:
+        now_et = None
+
     earnings: list[dict[str, Any]] = []
     for d in days:
         try:
-            earnings.extend(nasdaq_get_earnings_for_date(d))
+            earnings.extend(nasdaq_get_earnings_for_date(d, today=anchor_date, now_et=now_et))
         except Exception as e:
             print(f"[nasdaq_fetch] date={d.isoformat()} failed error={type(e).__name__}: {e}")
             continue
