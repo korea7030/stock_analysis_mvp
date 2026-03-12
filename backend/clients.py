@@ -268,10 +268,7 @@ def marketbeat_get_weekly_earnings(timeout_s: int = 10) -> list[dict[str, Any]]:
                 if ticker
                 else None
             )
-            transcript_query = f'"earnings call transcript" {ticker}' if ticker else None
-            transcript_search_url = (
-                f"https://www.google.com/search?q={urllib.parse.quote_plus(transcript_query)}" if transcript_query else None
-            )
+            transcript_search_url = seekingalpha_transcripts_url(ticker)
 
             earnings.append(
                 {
@@ -314,6 +311,16 @@ def _nasdaq_time_label(value: str | None) -> str:
         "time-not-supplied": "Time Not Supplied",
     }
     return mapping.get(cleaned, cleaned)
+
+
+def seekingalpha_transcripts_url(ticker: str | None) -> str | None:
+    if ticker is None:
+        return None
+    symbol = ticker.strip().upper()
+    if not symbol:
+        return None
+    quoted = urllib.parse.quote(symbol, safe=":.")
+    return f"https://seekingalpha.com/symbol/{quoted}/earnings/transcripts"
 
 
 def _nasdaq_status(
@@ -404,10 +411,7 @@ def nasdaq_get_earnings_for_date(
                 if ticker
                 else None
             )
-            transcript_query = f'"earnings call transcript" {ticker}' if ticker else None
-            transcript_search_url = (
-                f"https://www.google.com/search?q={urllib.parse.quote_plus(transcript_query)}" if transcript_query else None
-            )
+            transcript_search_url = seekingalpha_transcripts_url(ticker)
 
             out.append(
                 {

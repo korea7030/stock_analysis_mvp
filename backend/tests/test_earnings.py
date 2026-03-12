@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+# pyright: basic, reportMissingImports=false
+
 from datetime import date
 
 import backend.clients as clients
@@ -51,6 +53,7 @@ def test_nasdaq_get_earnings_for_date_reported(monkeypatch):
     assert it["status"] == "reported"
     assert it["report_date"] == "2026-03-11"
     assert it["source"] == "nasdaq"
+    assert it["transcript_search_url"] == "https://seekingalpha.com/symbol/ABCD/earnings/transcripts"
 
 
 def test_nasdaq_get_earnings_for_date_upcoming(monkeypatch):
@@ -88,3 +91,9 @@ def test_nasdaq_get_earnings_for_date_upcoming(monkeypatch):
     assert it["status"] == "upcoming"
     assert it["last_year_report_date"] == "3/12/2025"
     assert it["last_year_eps"] == "$0.42"
+    assert it["transcript_search_url"] == "https://seekingalpha.com/symbol/EFGH/earnings/transcripts"
+
+
+def test_seekingalpha_transcripts_url_preserves_colon():
+    url = clients.seekingalpha_transcripts_url("tsla:ca")
+    assert url == "https://seekingalpha.com/symbol/TSLA:CA/earnings/transcripts"
