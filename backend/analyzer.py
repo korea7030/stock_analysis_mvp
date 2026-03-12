@@ -9,7 +9,7 @@ from bs4 import BeautifulSoup, XMLParsedAsHTMLWarning
 from sec_downloader import Downloader
 
 from .clients import (
-    marketbeat_get_weekly_earnings,
+    get_weekly_earnings,
     sec_download_filing_url,
     sec_get_exhibit_urls,
     sec_get_filing_html,
@@ -798,4 +798,4 @@ def _get_best_filing_html(
 
 
 def get_marketbeat_earnings():
-    return marketbeat_get_weekly_earnings()
+    return get_weekly_earnings()

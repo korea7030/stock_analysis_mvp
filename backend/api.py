@@ -167,12 +167,23 @@ async def earnings():
         return cached_payload
 
     print(f"[cache] kind=earnings cache_hit=false key={cache_key}")
-
+    
     try:
         if get_marketbeat_earnings is None:
             payload: list[dict[str, Any]] = []
         else:
             payload = get_marketbeat_earnings() or []
+
+        if not payload:
+            empty_ttl_s = int(os.getenv("EARNINGS_EMPTY_TTL_S", "300"))
+            if _earnings_last_success is not None:
+                _earnings_cache.set(cache_key, _earnings_last_success, empty_ttl_s)
+                print(f"[cache] kind=earnings cache_set=last_success ttl_s={empty_ttl_s} key={cache_key}")
+                return _earnings_last_success
+            _earnings_cache.set(cache_key, payload, empty_ttl_s)
+            print(f"[cache] kind=earnings cache_set=empty ttl_s={empty_ttl_s} key={cache_key}")
+            return payload
+
         _earnings_cache.set(cache_key, payload, EARNINGS_CACHE_TTL_S)
         _earnings_last_success = payload
         return payload
