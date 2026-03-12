@@ -3,18 +3,19 @@ import os
 import re
 import warnings
 from datetime import datetime
+from typing import Any
 
 from bs4 import BeautifulSoup, XMLParsedAsHTMLWarning
 from sec_downloader import Downloader
 
-from backend.clients import (
+from .clients import (
     marketbeat_get_weekly_earnings,
     sec_download_filing_url,
     sec_get_exhibit_urls,
     sec_get_filing_html,
     sec_get_filing_metadatas,
 )
-from backend.postgres_store import load_section_history, save_section_history
+from .postgres_store import load_section_history, save_section_history
 
 warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
 
@@ -74,7 +75,7 @@ def parse_number(text: str) -> float | None:
 
 
 def pct_change(curr: float, prev: float) -> float | None:
-    if prev is None or abs(prev) < 1e-9:
+    if abs(prev) < 1e-9:
         return None
     return (curr - prev) / abs(prev) * 100.0
 
@@ -112,13 +113,31 @@ def annotate_income_html(income_html: str) -> str:
 
         def make_badge(pct):
             span = soup.new_tag("span")
-            span["class"] = ["delta-badge"]
+
+            existing = span.get("class")
+            if isinstance(existing, list):
+                class_str = " ".join(str(c) for c in existing)
+            elif isinstance(existing, str):
+                class_str = existing
+            else:
+                class_str = ""
+
+            def add_class(class_name: str) -> None:
+                nonlocal class_str
+                classes = [c for c in class_str.split(" ") if c]
+                if class_name not in classes:
+                    classes.append(class_name)
+                class_str = " ".join(classes)
+
+            add_class("delta-badge")
             if pct is None:
-                span["class"].append("delta-na")
+                add_class("delta-na")
+                span["class"] = class_str
                 span.string = "N/A"
                 return span
             arrow = "▲" if pct > 0 else "▼" if pct < 0 else "•"
-            span["class"].append("delta-up" if pct > 0 else "delta-down" if pct < 0 else "delta-flat")
+            add_class("delta-up" if pct > 0 else "delta-down" if pct < 0 else "delta-flat")
+            span["class"] = class_str
             span.string = f"{arrow} {pct:+.1f}%"
             return span
 
@@ -135,75 +154,19 @@ def annotate_income_html(income_html: str) -> str:
 
 
 # ----------------------------
-# 테이블 분류 (🔥 핵심 수정)
-# ----------------------------
-
-def classify_table(table) -> str | None:
-    text = table.get_text(" ", strip=True).lower()
-
-    # 🔥 숫자 없는 테이블 제거 (TOC 방지)
-    numeric_tags = table.find_all("ix:nonfraction")
-    has_inline_xbrl = len(numeric_tags) >= 4
-    if not has_inline_xbrl:
-        numeric_like = 0
-        for td in table.find_all("td"):
-            if parse_number(td.get_text(" ", strip=True)) is not None:
-                numeric_like += 1
-                if numeric_like >= 6:
-                    break
-        if numeric_like < 6:
-            return None
-
-    if any(k in text for k in [
-        "total assets",
-        "statement of financial position",
-        "balance sheet",
-        "liabilities and equity",
-        "liabilities and shareholders",
-        "stockholders’ equity",
-        "shareholders' equity",
-    ]):
-        return "balance_sheet"
-
-    if any(k in text for k in [
-        "statements of cash flows",
-        "statement of cash flows",
-        "cash flows",
-        "net cash provided",
-        "operating activities",
-        "investing activities",
-        "financing activities",
-    ]):
-        return "cash_flow"
-
-    if any(k in text for k in [
-        "statements of operations",
-        "statement of operations",
-        "income statement",
-        "statements of income",
-        "net sales",
-        "revenue",
-        "gross margin",
-        "operating income",
-        "net income",
-        "earnings per share",
-    ]):
-        return "income_statement"
-
-    return None
-
-
-# ----------------------------
 # META 추출
 # ----------------------------
 
-def extract_meta(html, ticker, form):
+MetaDict = dict[str, str | None]
+
+
+def extract_meta(html: str, ticker: str, form: str) -> MetaDict:
     soup = BeautifulSoup(html, "lxml-xml")
     company = None
     period_end = None
 
     for tag in soup.find_all(True):
-        nm = tag.attrs.get("name", "").lower()
+        nm = str(tag.attrs.get("name") or "").lower()
         if "entityregistrantname" in nm:
             company = tag.get_text(strip=True)
         elif "documentperiodenddate" in nm:
@@ -233,6 +196,11 @@ def extract_meta(html, ticker, form):
 # ----------------------------
 # 테이블 추출
 # ----------------------------
+
+
+INCOME_MIN_SCORE = 5
+BALANCE_MIN_SCORE = 4
+CASHFLOW_MIN_SCORE = 4
 
 
 def _table_text_with_context(table) -> str:
@@ -303,7 +271,8 @@ def _table_features(table) -> dict[str, float | int | bool | str]:
             "selected financial data",
             "quarterly data",
             "supplementary",
-            "index",
+            # Avoid matching unrelated strings like "S&P 500 Index".
+            "index to financial",
         ]
     )
 
@@ -321,8 +290,8 @@ def _table_features(table) -> dict[str, float | int | bool | str]:
     }
 
 
-def _score_income(f: dict[str, float | int | bool | str]) -> int:
-    text = str(f["text"])
+def _score_base(f: dict[str, float | int | bool | str]) -> int:
+    """Base score shared across all statement kinds."""
     score = 0
     if bool(f["toc_flag"]):
         score -= 6
@@ -347,6 +316,13 @@ def _score_income(f: dict[str, float | int | bool | str]) -> int:
         score += 2
     elif ix_count >= 4:
         score += 1
+
+    return score
+
+
+def _score_income(f: dict[str, float | int | bool | str]) -> int:
+    text = str(f["text"])
+    score = _score_base(f)
 
     if any(
         k in text
@@ -382,30 +358,7 @@ def _score_income(f: dict[str, float | int | bool | str]) -> int:
 
 def _score_balance(f: dict[str, float | int | bool | str]) -> int:
     text = str(f["text"])
-    score = 0
-    if bool(f["toc_flag"]):
-        score -= 6
-    if bool(f["non_primary_flag"]):
-        score -= 2
-    if int(f["link_count"]) >= 10 and float(f["numeric_ratio"]) < 0.20:
-        score -= 3
-
-    numeric_cells_total = int(f["numeric_cells_total"])
-    numeric_rows_with_2 = int(f["numeric_rows_with_2"])
-    ix_count = int(f["ix_count"])
-
-    if numeric_cells_total >= 10:
-        score += 2
-    elif numeric_cells_total >= 6:
-        score += 1
-    if numeric_rows_with_2 >= 3:
-        score += 2
-    elif numeric_rows_with_2 >= 2:
-        score += 1
-    if ix_count >= 8:
-        score += 2
-    elif ix_count >= 4:
-        score += 1
+    score = _score_base(f)
 
     if any(k in text for k in ["balance sheet", "statement of financial position"]):
         score += 3
@@ -418,6 +371,7 @@ def _score_balance(f: dict[str, float | int | bool | str]) -> int:
     if (
         "total equity" in text
         or "stockholders" in text
+        # U+0027 (straight apostrophe) vs U+2019 (curly quote)
         or "shareholders' equity" in text
         or "shareholders’ equity" in text
     ):
@@ -433,30 +387,7 @@ def _score_balance(f: dict[str, float | int | bool | str]) -> int:
 
 def _score_cashflow(f: dict[str, float | int | bool | str]) -> int:
     text = str(f["text"])
-    score = 0
-    if bool(f["toc_flag"]):
-        score -= 6
-    if bool(f["non_primary_flag"]):
-        score -= 2
-    if int(f["link_count"]) >= 10 and float(f["numeric_ratio"]) < 0.20:
-        score -= 3
-
-    numeric_cells_total = int(f["numeric_cells_total"])
-    numeric_rows_with_2 = int(f["numeric_rows_with_2"])
-    ix_count = int(f["ix_count"])
-
-    if numeric_cells_total >= 10:
-        score += 2
-    elif numeric_cells_total >= 6:
-        score += 1
-    if numeric_rows_with_2 >= 3:
-        score += 2
-    elif numeric_rows_with_2 >= 2:
-        score += 1
-    if ix_count >= 8:
-        score += 2
-    elif ix_count >= 4:
-        score += 1
+    score = _score_base(f)
 
     if any(k in text for k in ["statement of cash flows", "statements of cash flows", "cash flows"]):
         score += 3
@@ -496,9 +427,9 @@ def extract_raw_tables(html):
         if cashflow_score > best_cashflow[0]:
             best_cashflow = (cashflow_score, str(table))
 
-    income_html = best_income[1] if best_income[0] >= 5 else None
-    balance_html = best_balance[1] if best_balance[0] >= 4 else None
-    cashflow_html = best_cashflow[1] if best_cashflow[0] >= 4 else None
+    income_html = best_income[1] if best_income[0] >= INCOME_MIN_SCORE else None
+    balance_html = best_balance[1] if best_balance[0] >= BALANCE_MIN_SCORE else None
+    cashflow_html = best_cashflow[1] if best_cashflow[0] >= CASHFLOW_MIN_SCORE else None
 
     return income_html, balance_html, cashflow_html
 
@@ -541,7 +472,15 @@ def _metric_payload(values: list[float]) -> dict[str, float | None]:
     }
 
 
-def extract_metrics(income_html: str | None, balance_html: str | None, cashflow_html: str | None) -> dict:
+MetricPayload = dict[str, float | None]
+MetricsDict = dict[str, MetricPayload]
+
+
+def extract_metrics(
+    income_html: str | None,
+    balance_html: str | None,
+    cashflow_html: str | None,
+) -> MetricsDict:
     revenue_vals = _find_row_values(
         income_html,
         [
@@ -675,7 +614,7 @@ def extract_sections(
     html: str,
     form: str,
     ticker: str,
-    meta: dict | None = None,
+    meta: MetaDict | None = None,
 ) -> dict[str, str | None]:
     soup = BeautifulSoup(html, "lxml")
     text = soup.get_text("\n")
@@ -728,7 +667,7 @@ def extract_sections(
 # 메인 분석
 # ----------------------------
 
-def run_analysis(ticker: str, form: str = "10-Q"):
+def run_analysis(ticker: str, form: str = "10-Q") -> dict[str, Any]:
     dl = Downloader(
         company_name="Stock Analysis MVP",
         email_address="korea7030.jhl@gmail.com"
@@ -744,15 +683,16 @@ def run_analysis(ticker: str, form: str = "10-Q"):
     if income_html:
         income_html = annotate_income_html(income_html)
 
-    schema = init_schema()
-    schema["meta"] = extract_meta(html, ticker, form)
+    schema: dict[str, Any] = init_schema()
+    meta = extract_meta(html, ticker, form)
+    schema["meta"] = meta
     if filing_meta is not None:
-        schema["meta"]["filing_date"] = getattr(filing_meta, "filing_date", None)
-        schema["meta"]["accession_number"] = getattr(filing_meta, "accession_number", None)
+        meta["filing_date"] = getattr(filing_meta, "filing_date", None)
+        meta["accession_number"] = getattr(filing_meta, "accession_number", None)
     if source_url:
-        schema["meta"]["source_url"] = source_url
+        meta["source_url"] = source_url
     schema["metrics"] = extract_metrics(income_html, balance_html, cashflow_html)
-    schema["sections"] = extract_sections(html, form, ticker, schema.get("meta"))
+    schema["sections"] = extract_sections(html, form, ticker, meta)
     schema["tables"] = {
         "income_statement": income_html,
         "balance_sheet": balance_html,
