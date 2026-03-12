@@ -115,3 +115,26 @@ def test_mdna_skips_toc_and_returns_body_text(monkeypatch: pytest.MonkeyPatch) -
     mdna = str(sections.get("mdna") or "").lower()
     assert "this section provides management" in mdna
     assert "table of contents" not in mdna
+
+
+def test_sections_avoid_cross_reference_boilerplate(monkeypatch: pytest.MonkeyPatch) -> None:
+    fixture_html = _read_fixture("boilerplate_then_risk_mdna.html")
+
+    def _fake_sec_html(*_args: object, **_kwargs: object) -> str:
+        return fixture_html
+
+    monkeypatch.setattr(
+        "backend.analyzer.sec_get_filing_html",
+        _fake_sec_html,
+    )
+
+    result = cast(dict[str, Any], run_analysis("AAPL", "10-K"))
+    sections = cast(dict[str, Any], result["sections"])
+
+    risk = str(sections.get("risk_factors") or "").lower()
+    mdna = str(sections.get("mdna") or "").lower()
+
+    assert "we face intense competition" in risk
+    assert "assumes no obligation" not in risk
+    assert "net sales increased" in mdna
+    assert "see item 7 of this form" not in mdna
