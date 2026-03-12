@@ -583,6 +583,86 @@ def _normalize_text_block(text: str) -> str:
     return cleaned.strip()
 
 
+def _score_heading_line(line: str, *, include_keywords: list[str]) -> int:
+    lowered = line.lower().strip()
+    if not lowered:
+        return -10_000
+
+    if re.search(r"\.{2,}\s*\d+\s*$", line) is not None:
+        return -10_000
+
+    if len(lowered) > 180:
+        return -10_000
+
+    negative_phrases = [
+        "under the heading",
+        "of this form",
+        "see item",
+        "refer to",
+        "as discussed",
+        "forward-looking statements",
+        "assumes no obligation",
+    ]
+    if any(p in lowered for p in negative_phrases):
+        return -5000
+
+    score = 0
+    if lowered.startswith("item "):
+        score += 50
+    if re.search(r"\bitem\s+\d+[a-z]?\b", lowered):
+        score += 20
+    if "." in lowered:
+        score += 5
+    if any(k in lowered for k in include_keywords):
+        score += 100
+
+    letters = sum(1 for ch in line if ch.isalpha())
+    if letters >= 4 and line.upper() == line:
+        score += 20
+
+    return score
+
+
+def _extract_item_section(
+    text: str,
+    *,
+    start_item_re: re.Pattern[str],
+    end_item_re: re.Pattern[str],
+    include_keywords: list[str],
+    max_chars: int = 25000,
+) -> str | None:
+    lines = text.splitlines()
+    candidates: list[tuple[int, int]] = []
+    for i, line in enumerate(lines):
+        if start_item_re.search(line) is None:
+            continue
+        score = _score_heading_line(line, include_keywords=include_keywords)
+        if score < 0:
+            continue
+        candidates.append((score, i))
+
+    if not candidates:
+        return None
+
+    candidates.sort(reverse=True)
+    for _score, start_idx in candidates[:10]:
+        end_idx = None
+        for j in range(start_idx + 1, len(lines)):
+            if end_item_re.search(lines[j]) is not None:
+                end_idx = j
+                break
+        chunk = "\n".join(lines[start_idx : (end_idx if end_idx is not None else len(lines))]).strip()
+        chunk = _normalize_text_block(chunk)
+        if not chunk:
+            continue
+        clipped = chunk[:max_chars]
+        if _is_toc_like_snippet_relaxed(clipped):
+            continue
+        return clipped
+
+    return None
+
+
 def _is_toc_like_snippet(section: str) -> bool:
     lowered = section.lower()
     if "table of contents" in lowered:
@@ -596,6 +676,19 @@ def _is_toc_like_snippet(section: str) -> bool:
     if digits >= 20 and letters < digits:
         return True
 
+    return False
+
+
+def _is_toc_like_snippet_relaxed(section: str) -> bool:
+    lowered = section.lower()
+    if "table of contents" in lowered:
+        return True
+    if re.search(r"\.{2,}\s*\d+\s*$", section) is not None:
+        return True
+    digits = sum(1 for ch in section if ch.isdigit())
+    letters = sum(1 for ch in section if ch.isalpha())
+    if digits >= 20 and letters < digits:
+        return True
     return False
 
 
@@ -671,11 +764,44 @@ def extract_sections(
     text = soup.get_text("\n")
     text = _normalize_text_block(text)
 
+    form_upper = (form or "").upper()
     mdna_patterns = ["management's discussion and analysis", "item 7", "item 2"]
     risk_patterns = ["risk factors", "item 1a"]
 
-    mdna = _extract_section(text, mdna_patterns)
-    risk = _extract_section(text, risk_patterns)
+    mdna: str | None = None
+    risk: str | None = None
+
+    if form_upper == "10-K":
+        mdna = _extract_item_section(
+            text,
+            start_item_re=re.compile(r"^\s*item\s+7\b", re.IGNORECASE),
+            end_item_re=re.compile(r"^\s*item\s+(?:7a|8)\b", re.IGNORECASE),
+            include_keywords=["management", "discussion", "analysis", "md&a"],
+        )
+        risk = _extract_item_section(
+            text,
+            start_item_re=re.compile(r"^\s*item\s+1a\b", re.IGNORECASE),
+            end_item_re=re.compile(r"^\s*item\s+(?:1b|2)\b", re.IGNORECASE),
+            include_keywords=["risk", "factors"],
+        )
+    elif form_upper == "10-Q":
+        mdna = _extract_item_section(
+            text,
+            start_item_re=re.compile(r"^\s*item\s+2\b", re.IGNORECASE),
+            end_item_re=re.compile(r"^\s*item\s+(?:3|4)\b", re.IGNORECASE),
+            include_keywords=["management", "discussion", "analysis", "md&a"],
+        )
+        risk = _extract_item_section(
+            text,
+            start_item_re=re.compile(r"^\s*item\s+1a\b", re.IGNORECASE),
+            end_item_re=re.compile(r"^\s*item\s+2\b", re.IGNORECASE),
+            include_keywords=["risk", "factors"],
+        )
+
+    if mdna is None:
+        mdna = _extract_section(text, mdna_patterns)
+    if risk is None:
+        risk = _extract_section(text, risk_patterns)
 
     key = f"{form}:{ticker}"
     prev = load_section_history(ticker=ticker, form=form) or _SECTION_HISTORY.get(key, {})
