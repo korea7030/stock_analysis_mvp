@@ -3,13 +3,16 @@
 import { useEffect, useState } from "react";
 import DOMPurify from "dompurify";
 
-import type { AnalyzeResponse, FilingForm, MetricValue } from "@/lib/apiTypes";
+import type { AnalyzeResponse, EarningsItem, FilingForm, MetricValue } from "@/lib/apiTypes";
 import { annotateTableHTML } from "@/lib/filingTables";
 
 export default function Dashboard() {
   const [ticker, setTicker] = useState("AAPL");
   const [form, setForm] = useState<FilingForm>("10-Q");
   const [data, setData] = useState<AnalyzeResponse | null>(null);
+  const [earnings, setEarnings] = useState<EarningsItem[] | null>(null);
+  const [earningsLoading, setEarningsLoading] = useState(false);
+  const [earningsError, setEarningsError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [inputError, setInputError] = useState<string | null>(null);
@@ -41,7 +44,8 @@ export default function Dashboard() {
         const envOverride = process.env.NEXT_PUBLIC_API_BASE_URL?.trim();
         const resolvedBase = isLocalhost && !envOverride ? localFallbackBase : nextBase;
         if (active && resolvedBase && isValidBaseUrl(resolvedBase)) {
-          setApiBaseUrl(normalizeBaseUrl(resolvedBase));
+          const normalized = normalizeBaseUrl(resolvedBase);
+          setApiBaseUrl(normalized);
         }
       } catch (err) {
         if (process.env.NODE_ENV !== "production") {
@@ -56,6 +60,45 @@ export default function Dashboard() {
       active = false;
     };
   }, []);
+
+  useEffect(() => {
+    let active = true;
+    const baseUrl = normalizeBaseUrl(apiBaseUrl);
+    if (!isValidBaseUrl(baseUrl)) return;
+
+    async function loadEarnings() {
+      setEarningsLoading(true);
+      setEarningsError(null);
+      try {
+        const er = await fetch(`${baseUrl}/earnings`);
+        if (!er.ok) {
+          throw new Error(`HTTP ${er.status}`);
+        }
+        const payload = (await er.json()) as EarningsItem[];
+        if (active) {
+          setEarnings(Array.isArray(payload) ? payload : []);
+        }
+      } catch (e) {
+        if (active) {
+          const message = e instanceof Error ? e.message : "Failed to load earnings";
+          setEarningsError(message);
+          setEarnings([]);
+        }
+      } finally {
+        if (active) {
+          setEarningsLoading(false);
+        }
+      }
+    }
+
+    loadEarnings();
+    return () => {
+      active = false;
+    };
+  }, [apiBaseUrl]);
+
+  const upcoming = (earnings || []).filter((it) => (it.status || "").toLowerCase() !== "reported");
+  const reported = (earnings || []).filter((it) => (it.status || "").toLowerCase() === "reported");
 
   async function analyze() {
     if (!ticker.trim()) {
@@ -138,8 +181,12 @@ export default function Dashboard() {
   // ---------------- 렌더 ----------------
 
   return (
-    <div className="max-w-7xl mx-auto p-6 space-y-6">
-      <h1 className="text-3xl font-bold">SEC Filing Dashboard</h1>
+    <div className="min-h-screen bg-gradient-to-b from-slate-50 via-white to-slate-50">
+      <div className="max-w-7xl mx-auto p-6 space-y-6">
+        <div className="rounded-2xl bg-gradient-to-r from-slate-900 to-slate-700 text-white p-6 shadow">
+          <h1 className="text-3xl font-semibold tracking-tight">SEC Filing Dashboard</h1>
+          <p className="text-sm text-slate-200 mt-1">Statements, MD&A, and earnings in one place.</p>
+        </div>
 
       {/* 입력 영역 */}
       <div className="bg-white rounded-xl shadow p-4 flex flex-wrap gap-4 items-center">
@@ -233,8 +280,93 @@ export default function Dashboard() {
         </div>
       )}
 
-      {data && (
-        <>
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        <div className="lg:col-span-4 space-y-6">
+          <div className="bg-white rounded-xl shadow p-5">
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-semibold">Earnings This Week</h2>
+              <a
+                className="text-xs text-slate-500 hover:underline"
+                href="https://www.marketbeat.com/earnings/weekly/"
+                target="_blank"
+                rel="noreferrer"
+              >
+                Source
+              </a>
+            </div>
+            {earningsLoading && <p className="text-sm text-slate-500 mt-3">Loading...</p>}
+            {earningsError && <p className="text-sm text-red-600 mt-3">{earningsError}</p>}
+            {!earningsLoading && !earningsError && earnings && earnings.length === 0 && (
+              <p className="text-sm text-slate-500 mt-3">No earnings found.</p>
+            )}
+
+            {earnings && earnings.length > 0 && (
+              <div className="mt-4 space-y-4">
+                <div>
+                  <div className="text-xs font-medium text-slate-500">Upcoming</div>
+                  <div className="mt-2 space-y-2">
+                    {upcoming.slice(0, 8).map((it, idx) => (
+                      <div key={`${it.ticker || "x"}-${idx}`} className="border rounded-lg p-3">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="font-medium text-sm">{it.ticker || "-"}</div>
+                          <div className="text-xs text-slate-500">{it.release_time || "-"}</div>
+                        </div>
+                        <div className="text-xs text-slate-600 mt-1 line-clamp-2">{it.company || "-"}</div>
+                        <div className="flex gap-3 mt-2 text-xs">
+                          {it.earnings_release_url && (
+                            <a className="text-blue-600 hover:underline" href={it.earnings_release_url} target="_blank" rel="noreferrer">
+                              8-K Release
+                            </a>
+                          )}
+                          {it.transcript_search_url && (
+                            <a className="text-blue-600 hover:underline" href={it.transcript_search_url} target="_blank" rel="noreferrer">
+                              Find Transcript
+                            </a>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div>
+                  <div className="text-xs font-medium text-slate-500">Reported</div>
+                  <div className="mt-2 space-y-2">
+                    {reported.slice(0, 8).map((it, idx) => (
+                      <div key={`${it.ticker || "y"}-${idx}`} className="border rounded-lg p-3 bg-slate-50">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="font-medium text-sm">{it.ticker || "-"}</div>
+                          <div className="text-xs text-slate-500">{it.release_time || "-"}</div>
+                        </div>
+                        <div className="text-xs text-slate-600 mt-1 line-clamp-2">{it.company || "-"}</div>
+                        <div className="grid grid-cols-2 gap-2 mt-2 text-xs text-slate-700">
+                          <div>EPS: {it.eps_actual || "-"} / {it.eps_estimate || "-"}</div>
+                          <div>Rev: {it.revenue_actual || "-"} / {it.revenue_estimate || "-"}</div>
+                        </div>
+                        <div className="flex gap-3 mt-2 text-xs">
+                          {it.earnings_release_url && (
+                            <a className="text-blue-600 hover:underline" href={it.earnings_release_url} target="_blank" rel="noreferrer">
+                              8-K Release
+                            </a>
+                          )}
+                          {it.transcript_search_url && (
+                            <a className="text-blue-600 hover:underline" href={it.transcript_search_url} target="_blank" rel="noreferrer">
+                              Find Transcript
+                            </a>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="lg:col-span-8 space-y-6">
+          {data && (
+            <>
           {/* 메타 */}
           <div className="bg-white rounded-xl shadow p-5">
             <h2 className="text-xl font-semibold mb-1">Meta</h2>
@@ -418,8 +550,11 @@ export default function Dashboard() {
               />
             </div>
           )}
-        </>
-      )}
+            </>
+          )}
+        </div>
+      </div>
+      </div>
     </div>
   );
 }
