@@ -442,10 +442,44 @@ def _row_numeric_values(row) -> list[float]:
     return values
 
 
+_year_re = re.compile(r"\b(19|20)\d{2}\b")
+
+
+def _infer_year_order(table_soup: BeautifulSoup) -> list[int]:
+    rows = table_soup.find_all("tr")
+    for row in rows[:10]:
+        years: list[int] = []
+        for cell in row.find_all(["th", "td"]):
+            txt = cell.get_text(" ", strip=True)
+            for m in _year_re.finditer(txt):
+                try:
+                    years.append(int(m.group(0)))
+                except ValueError:
+                    continue
+        distinct: list[int] = []
+        for y in years:
+            if y not in distinct:
+                distinct.append(y)
+        if len(distinct) >= 2:
+            return distinct
+    return []
+
+
+def _maybe_reverse_by_year_order(values: list[float], year_order: list[int]) -> list[float]:
+    if len(values) < 2:
+        return values
+    if len(year_order) < 2:
+        return values
+    if year_order[0] < year_order[1]:
+        return list(reversed(values))
+    return values
+
+
 def _find_row_values(table_html: str | None, keywords: list[str]) -> list[float]:
     if not table_html:
         return []
     soup = BeautifulSoup(table_html, "lxml")
+    year_order = _infer_year_order(soup)
     for row in soup.find_all("tr"):
         text = row.get_text(" ", strip=True).lower()
         if not text:
@@ -453,7 +487,7 @@ def _find_row_values(table_html: str | None, keywords: list[str]) -> list[float]
         if any(k in text for k in keywords):
             values = _row_numeric_values(row)
             if values:
-                return values
+                return _maybe_reverse_by_year_order(values, year_order)
     return []
 
 
