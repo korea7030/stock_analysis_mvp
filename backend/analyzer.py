@@ -663,6 +663,68 @@ def _extract_item_section(
     return None
 
 
+def _is_boilerplate_paragraph(paragraph: str, *, kind: str) -> bool:
+    lowered = paragraph.lower()
+
+    common_phrases = [
+        "forward-looking statements",
+        "assumes no obligation",
+        "except as required by law",
+        "unless otherwise stated",
+        "fiscal calendar",
+        "references to particular years",
+        "quarter, month",
+        "quarters, months",
+        "refers collectively",
+        "under the heading",
+        "this form 10-k",
+        "this form 10-q",
+        "this annual report on form",
+        "this quarterly report on form",
+    ]
+    if any(p in lowered for p in common_phrases):
+        return True
+
+    if kind == "risk":
+        risk_phrases = [
+            "safe harbor",
+            "cautionary statement",
+        ]
+        if any(p in lowered for p in risk_phrases):
+            return True
+
+    return False
+
+
+def _clean_section_text(section: str | None, *, kind: str) -> str | None:
+    if section is None:
+        return None
+    normalized = _normalize_text_block(section)
+    if not normalized:
+        return None
+
+    paragraphs = [p.strip() for p in re.split(r"\n\s*\n", normalized) if p.strip()]
+    if not paragraphs:
+        return None
+
+    kept: list[str] = []
+    max_chars = 12000
+    for i, p in enumerate(paragraphs):
+        if i == 0 and re.match(r"^\s*item\s+\d+[a-z]?\b", p, re.IGNORECASE):
+            kept.append(p)
+            continue
+        if _is_boilerplate_paragraph(p, kind=kind):
+            continue
+        kept.append(p)
+        if sum(len(x) for x in kept) >= max_chars:
+            break
+
+    cleaned = "\n\n".join(kept).strip()
+    if not cleaned:
+        return None
+    return cleaned
+
+
 def _is_toc_like_snippet(section: str) -> bool:
     lowered = section.lower()
     if "table of contents" in lowered:
@@ -802,6 +864,9 @@ def extract_sections(
         mdna = _extract_section(text, mdna_patterns)
     if risk is None:
         risk = _extract_section(text, risk_patterns)
+
+    mdna = _clean_section_text(mdna, kind="mdna")
+    risk = _clean_section_text(risk, kind="risk")
 
     key = f"{form}:{ticker}"
     prev = load_section_history(ticker=ticker, form=form) or _SECTION_HISTORY.get(key, {})
