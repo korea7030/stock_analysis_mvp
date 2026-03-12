@@ -266,7 +266,7 @@ export default function Dashboard() {
       <div className="max-w-7xl mx-auto p-6 space-y-6">
         <div className="rounded-2xl bg-gradient-to-r from-slate-900 to-slate-700 text-white p-6 shadow">
           <h1 className="text-3xl font-semibold tracking-tight">SEC Filing Dashboard</h1>
-          <p className="text-sm text-slate-200 mt-1">Statements, MD&A, and earnings in one place.</p>
+          <p className="text-sm text-slate-200 mt-1">Statements and earnings in one place.</p>
         </div>
 
       {/* 입력 영역 */}
@@ -527,38 +527,7 @@ export default function Dashboard() {
             </div>
           )}
 
-          {data.sections && (
-            <div className="bg-white rounded-xl shadow p-5 space-y-4">
-              <div>
-                <h2 className="text-xl font-semibold mb-2">MD&A</h2>
-                <pre className="whitespace-pre-wrap text-xs text-gray-700">
-                  {data.sections.mdna || "No section found."}
-                </pre>
-                {data.sections.mdna_diff && (
-                  <details className="mt-2">
-                    <summary className="text-xs text-gray-500 cursor-pointer">Show diff</summary>
-                    <pre className="whitespace-pre-wrap text-xs text-gray-600 mt-2">
-                      {data.sections.mdna_diff}
-                    </pre>
-                  </details>
-                )}
-              </div>
-              <div>
-                <h2 className="text-xl font-semibold mb-2">Risk Factors</h2>
-                <pre className="whitespace-pre-wrap text-xs text-gray-700">
-                  {data.sections.risk_factors || "No section found."}
-                </pre>
-                {data.sections.risk_factors_diff && (
-                  <details className="mt-2">
-                    <summary className="text-xs text-gray-500 cursor-pointer">Show diff</summary>
-                    <pre className="whitespace-pre-wrap text-xs text-gray-600 mt-2">
-                      {data.sections.risk_factors_diff}
-                    </pre>
-                  </details>
-                )}
-              </div>
-            </div>
-          )}
+
 
           {/* 뱃지 + 기본 스타일 */}
           <style>{`
