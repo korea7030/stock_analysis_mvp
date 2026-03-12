@@ -53,3 +53,17 @@ export type AnalyzeResponse = {
   tables: AnalyzeTables;
   last_updated?: string;
 };
+
+export type EarningsItem = {
+  ticker?: string | null;
+  company?: string | null;
+  release_time?: string | null;
+  eps_estimate?: string | null;
+  eps_actual?: string | null;
+  revenue_estimate?: string | null;
+  revenue_actual?: string | null;
+  status?: string | null;
+  earnings_release_url?: string | null;
+  transcript_search_url?: string | null;
+  source_url?: string | null;
+};

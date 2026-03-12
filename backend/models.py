@@ -67,6 +67,10 @@ class EarningsItem(BaseModel):
     eps_actual: Optional[str] = None
     revenue_estimate: Optional[str] = None
     revenue_actual: Optional[str] = None
+    status: Optional[str] = None
+    earnings_release_url: Optional[str] = None
+    transcript_search_url: Optional[str] = None
+    source_url: Optional[str] = None
 
     class Config:
         extra = "allow"

@@ -3,6 +3,7 @@ from __future__ import annotations
 import time
 import os
 import concurrent.futures
+import urllib.parse
 from typing import Any, Callable, Optional, TypeVar
 
 import requests
@@ -10,7 +11,7 @@ from bs4 import BeautifulSoup
 from pyrate_limiter import Duration, Limiter, Rate
 from sec_downloader.types import RequestedFilings
 
-from backend.cache import TTLCache
+from .cache import TTLCache
 
 
 SEC_RPS = int(os.getenv("SEC_RPS", "10"))
@@ -21,6 +22,14 @@ MARKETBEAT_LIMITER = Limiter(Rate(MARKETBEAT_RPS, Duration.SECOND))
 
 
 T = TypeVar("T")
+
+
+def _limiter_acquire(limiter: Limiter, name: str) -> None:
+    fn: Any = limiter.try_acquire
+    try:
+        fn(name, blocking=True)
+    except TypeError:
+        fn(name)
 
 
 class HttpStatusError(RuntimeError):
@@ -57,13 +66,15 @@ def _retry(
             sleep_s = min(max_sleep_s, base_sleep_s * (2 ** (attempt - 1)))
             print(f"[{label}] retry attempt={attempt} sleep_s={sleep_s:.2f} error={type(e).__name__}: {e}")
             time.sleep(sleep_s)
-    raise last_exc  # type: ignore[misc]
+    if last_exc is None:
+        raise RuntimeError(f"[{label}] failed without an exception")
+    raise last_exc
 
 
 def sec_get_filing_html(dl: Any, *, ticker: str, form: str, timeout_s: int = 30) -> str:
     def _call() -> str:
         t0 = time.time()
-        SEC_LIMITER.try_acquire("sec", blocking=True)
+        _limiter_acquire(SEC_LIMITER, "sec")
         waited_s = time.time() - t0
         rate_limited = waited_s >= 0.01
         print(
@@ -100,7 +111,7 @@ def sec_get_filing_metadatas(
 def sec_download_filing_url(dl: Any, *, url: str) -> str:
     def _call() -> str:
         t0 = time.time()
-        SEC_LIMITER.try_acquire("sec", blocking=True)
+        _limiter_acquire(SEC_LIMITER, "sec")
         waited_s = time.time() - t0
         rate_limited = waited_s >= 0.01
         print(f"[sec_download_url] rate_limited={rate_limited} waited_s={waited_s:.3f} url={url}")
@@ -206,7 +217,7 @@ def marketbeat_get_weekly_earnings(timeout_s: int = 10) -> list[dict[str, Any]]:
 
     def _call() -> list[dict[str, Any]]:
         t0 = time.time()
-        MARKETBEAT_LIMITER.try_acquire("marketbeat", blocking=True)
+        _limiter_acquire(MARKETBEAT_LIMITER, "marketbeat")
         waited_s = time.time() - t0
         rate_limited = waited_s >= 0.01
         print(f"[marketbeat_fetch] url={url} rate_limited={rate_limited} waited_s={waited_s:.3f}")
@@ -234,15 +245,44 @@ def marketbeat_get_weekly_earnings(timeout_s: int = 10) -> list[dict[str, Any]]:
             ticker_el = company_cell.select_one(".ticker-area")
             company_el = company_cell.select_one(".title-area")
 
+            ticker = ticker_el.text.strip().upper() if ticker_el else None
+            company = company_el.text.strip() if company_el else None
+            release_time = tds[1].text.strip()
+            eps_estimate = tds[2].text.strip()
+            eps_actual = tds[3].text.strip()
+            revenue_estimate = tds[4].text.strip()
+            revenue_actual = tds[5].text.strip()
+
+            def _is_missing(value: str | None) -> bool:
+                if value is None:
+                    return True
+                cleaned = value.strip()
+                return cleaned in {"", "-", "—", "N/A"}
+
+            status = "reported" if (not _is_missing(eps_actual) or not _is_missing(revenue_actual)) else "upcoming"
+            earnings_release_url = (
+                f"https://www.sec.gov/cgi-bin/browse-edgar?CIK={urllib.parse.quote_plus(ticker)}&type=8-K"
+                if ticker
+                else None
+            )
+            transcript_query = f'"earnings call transcript" {ticker}' if ticker else None
+            transcript_search_url = (
+                f"https://www.google.com/search?q={urllib.parse.quote_plus(transcript_query)}" if transcript_query else None
+            )
+
             earnings.append(
                 {
-                    "ticker": ticker_el.text.strip() if ticker_el else None,
-                    "company": company_el.text.strip() if company_el else None,
-                    "release_time": tds[1].text.strip(),
-                    "eps_estimate": tds[2].text.strip(),
-                    "eps_actual": tds[3].text.strip(),
-                    "revenue_estimate": tds[4].text.strip(),
-                    "revenue_actual": tds[5].text.strip(),
+                    "ticker": ticker,
+                    "company": company,
+                    "release_time": release_time,
+                    "eps_estimate": eps_estimate,
+                    "eps_actual": eps_actual,
+                    "revenue_estimate": revenue_estimate,
+                    "revenue_actual": revenue_actual,
+                    "status": status,
+                    "earnings_release_url": earnings_release_url,
+                    "transcript_search_url": transcript_search_url,
+                    "source_url": url,
                 }
             )
 
