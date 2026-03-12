@@ -398,7 +398,7 @@ export default function Dashboard() {
                         <div className="flex gap-3 mt-2 text-xs">
                           {it.earnings_release_url && (
                             <a className="text-blue-600 hover:underline" href={it.earnings_release_url} target="_blank" rel="noreferrer">
-                              8-K Release
+                              SEC 8-Ks
                             </a>
                           )}
                           {it.transcript_search_url && (
@@ -437,7 +437,7 @@ export default function Dashboard() {
                         <div className="flex gap-3 mt-2 text-xs">
                           {it.earnings_release_url && (
                             <a className="text-blue-600 hover:underline" href={it.earnings_release_url} target="_blank" rel="noreferrer">
-                              8-K Release
+                              SEC 8-Ks
                             </a>
                           )}
                           {it.transcript_search_url && (
