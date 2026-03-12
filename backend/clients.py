@@ -4,6 +4,7 @@ import time
 import os
 import concurrent.futures
 import urllib.parse
+from datetime import date, datetime, timedelta
 from typing import Any, Callable, Optional, TypeVar
 
 import requests
@@ -16,9 +17,11 @@ from .cache import TTLCache
 
 SEC_RPS = int(os.getenv("SEC_RPS", "10"))
 MARKETBEAT_RPS = int(os.getenv("MARKETBEAT_RPS", "2"))
+NASDAQ_RPS = int(os.getenv("NASDAQ_RPS", "2"))
 
 SEC_LIMITER = Limiter(Rate(SEC_RPS, Duration.SECOND))
 MARKETBEAT_LIMITER = Limiter(Rate(MARKETBEAT_RPS, Duration.SECOND))
+NASDAQ_LIMITER = Limiter(Rate(NASDAQ_RPS, Duration.SECOND))
 
 
 T = TypeVar("T")
@@ -289,3 +292,144 @@ def marketbeat_get_weekly_earnings(timeout_s: int = 10) -> list[dict[str, Any]]:
         return earnings
 
     return _retry(_call, attempts=2, base_sleep_s=0.5, max_sleep_s=2.0, label="marketbeat_fetch")
+
+
+def _nasdaq_headers() -> dict[str, str]:
+    return {
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0 Safari/537.36",
+        "Accept": "application/json, text/plain, */*",
+        "Origin": "https://www.nasdaq.com",
+        "Referer": "https://www.nasdaq.com/market-activity/earnings",
+    }
+
+
+def _nasdaq_time_label(value: str | None) -> str | None:
+    if value is None:
+        return None
+    cleaned = value.strip()
+    if not cleaned:
+        return None
+    mapping: dict[str, str] = {
+        "time-before-market-open": "Before Market Open",
+        "time-after-hours": "After Hours",
+        "time-not-supplied": "Time Not Supplied",
+    }
+    return mapping.get(cleaned, cleaned)
+
+
+def _is_missing_text(value: Any) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, str):
+        cleaned = value.strip()
+        return cleaned in {"", "-", "—", "N/A"}
+    return False
+
+
+def nasdaq_get_earnings_for_date(
+    report_date: date,
+    *,
+    timeout_s: int = 20,
+) -> list[dict[str, Any]]:
+    date_str = report_date.isoformat()
+    url = f"https://api.nasdaq.com/api/calendar/earnings?date={urllib.parse.quote_plus(date_str)}"
+
+    def _call() -> list[dict[str, Any]]:
+        t0 = time.time()
+        _limiter_acquire(NASDAQ_LIMITER, "nasdaq")
+        waited_s = time.time() - t0
+        rate_limited = waited_s >= 0.01
+        print(f"[nasdaq_fetch] url={url} rate_limited={rate_limited} waited_s={waited_s:.3f}")
+        r = requests.get(url, headers=_nasdaq_headers(), timeout=timeout_s)
+        if r.status_code != 200:
+            raise HttpStatusError(r.status_code, f"HTTP {r.status_code}")
+        payload = r.json()
+        rows = ((payload.get("data") or {}).get("rows")) or []
+        if not isinstance(rows, list):
+            return []
+
+        out: list[dict[str, Any]] = []
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            ticker_raw = row.get("symbol")
+            ticker = str(ticker_raw).strip().upper() if ticker_raw else None
+            company_raw = row.get("name")
+            company = str(company_raw).strip() if company_raw else None
+
+            eps_estimate = row.get("epsForecast")
+            eps_actual = row.get("eps")
+
+            status = "reported" if not _is_missing_text(eps_actual) else "upcoming"
+            earnings_release_url = (
+                f"https://www.sec.gov/cgi-bin/browse-edgar?CIK={urllib.parse.quote_plus(ticker)}&type=8-K"
+                if ticker
+                else None
+            )
+            transcript_query = f'"earnings call transcript" {ticker}' if ticker else None
+            transcript_search_url = (
+                f"https://www.google.com/search?q={urllib.parse.quote_plus(transcript_query)}" if transcript_query else None
+            )
+
+            out.append(
+                {
+                    "ticker": ticker,
+                    "company": company,
+                    "release_time": _nasdaq_time_label(row.get("time")),
+                    "eps_estimate": str(eps_estimate).strip() if not _is_missing_text(eps_estimate) else None,
+                    "eps_actual": str(eps_actual).strip() if not _is_missing_text(eps_actual) else None,
+                    "revenue_estimate": None,
+                    "revenue_actual": None,
+                    "status": status,
+                    "report_date": date_str,
+                    "earnings_release_url": earnings_release_url,
+                    "transcript_search_url": transcript_search_url,
+                    "source_url": url,
+                    "source": "nasdaq",
+                    "last_year_eps": (str(row.get("lastYearEPS")).strip() if not _is_missing_text(row.get("lastYearEPS")) else None),
+                    "last_year_report_date": (
+                        str(row.get("lastYearRptDt")).strip() if not _is_missing_text(row.get("lastYearRptDt")) else None
+                    ),
+                }
+            )
+        return out
+
+    return _retry(_call, attempts=3, base_sleep_s=0.5, max_sleep_s=4.0, label="nasdaq_fetch")
+
+
+def nasdaq_get_weekly_earnings(anchor_date: date | None = None) -> list[dict[str, Any]]:
+    if anchor_date is None:
+        try:
+            from zoneinfo import ZoneInfo
+
+            anchor_date = datetime.now(ZoneInfo("America/New_York")).date()
+        except Exception:
+            anchor_date = datetime.now().date()
+
+    week_start = anchor_date - timedelta(days=anchor_date.weekday())
+    days = [week_start + timedelta(days=i) for i in range(7)]
+
+    earnings: list[dict[str, Any]] = []
+    for d in days:
+        try:
+            earnings.extend(nasdaq_get_earnings_for_date(d))
+        except Exception as e:
+            print(f"[nasdaq_fetch] date={d.isoformat()} failed error={type(e).__name__}: {e}")
+            continue
+
+    return earnings
+
+
+def get_weekly_earnings() -> list[dict[str, Any]]:
+    try:
+        earnings = nasdaq_get_weekly_earnings()
+        if earnings:
+            return earnings
+    except Exception as e:
+        print(f"[earnings] nasdaq_failed error={type(e).__name__}: {e}")
+
+    try:
+        return marketbeat_get_weekly_earnings()
+    except Exception as e:
+        print(f"[earnings] marketbeat_failed error={type(e).__name__}: {e}")
+        return []
