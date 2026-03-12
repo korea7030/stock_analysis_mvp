@@ -64,6 +64,24 @@ export function annotateTableHTML(html: string, kind: AnnotateKind): string {
     return false;
   };
 
+  const yearRowYears = (() => {
+    for (const row of rows) {
+      const tr = row as HTMLTableRowElement;
+      const cells = Array.from(tr.querySelectorAll("td,th"));
+      if (!cells.length) continue;
+      const cellTexts = cells
+        .map((c) => (c.textContent || "").replace(/\u00a0/g, " ").trim())
+        .filter(Boolean);
+      if (cellTexts.length >= 2 && cellTexts.every((t) => /^(19|20)\d{2}$/.test(t))) {
+        return cellTexts.map((t) => Number(t)).filter((n) => Number.isFinite(n));
+      }
+    }
+    return [] as number[];
+  })();
+
+  const yearCount = yearRowYears.length;
+  const yearAscending = yearCount >= 2 ? yearRowYears[0] < yearRowYears[1] : false;
+
   doc.querySelectorAll(".delta-badge").forEach((el) => el.remove());
 
   rows.forEach((row) => {
@@ -86,6 +104,50 @@ export function annotateTableHTML(html: string, kind: AnnotateKind): string {
     });
 
     if (kind === "income") {
+      const hasRevenuesHeader = (doc.body.textContent || "").toLowerCase().includes("revenues");
+      const hasOtherIncomeHeader = (doc.body.textContent || "").toLowerCase().includes("other income");
+
+      if (yearCount >= 2 && numericCells.length === yearCount * 2 && hasRevenuesHeader && hasOtherIncomeHeader) {
+        const groupSize = 2;
+        const curYearIdx = yearAscending ? yearCount - 1 : 0;
+        const prevYearIdx = yearAscending ? yearCount - 2 : 1;
+
+        const curRevCell = numericCells[curYearIdx * groupSize + 0];
+        const prevRevCell = numericCells[prevYearIdx * groupSize + 0];
+        const curOtherCell = numericCells[curYearIdx * groupSize + 1];
+        const prevOtherCell = numericCells[prevYearIdx * groupSize + 1];
+
+        const curRev = parseNumLocal(curRevCell.textContent);
+        const prevRev = parseNumLocal(prevRevCell.textContent);
+        if (curRev != null && prevRev != null && !cellHasBadge(curRevCell)) {
+          const pct = prevRev !== 0 ? (curRev - prevRev) / Math.abs(prevRev) : 0;
+          curRevCell.appendChild(makeBadgeLocal(pct));
+        }
+
+        const curOther = parseNumLocal(curOtherCell.textContent);
+        const prevOther = parseNumLocal(prevOtherCell.textContent);
+        if (curOther != null && prevOther != null && !cellHasBadge(curOtherCell)) {
+          const pct = prevOther !== 0 ? (curOther - prevOther) / Math.abs(prevOther) : 0;
+          curOtherCell.appendChild(makeBadgeLocal(pct));
+        }
+
+        return;
+      }
+
+      if (yearCount >= 2 && numericCells.length === yearCount) {
+        const curIdx = yearAscending ? yearCount - 1 : 0;
+        const prevIdx = yearAscending ? yearCount - 2 : 1;
+        const curCell = numericCells[curIdx];
+        const prevCell = numericCells[prevIdx];
+        const cur = parseNumLocal(curCell.textContent);
+        const prev = parseNumLocal(prevCell.textContent);
+        if (cur != null && prev != null && !cellHasBadge(curCell)) {
+          const pct = prev !== 0 ? (cur - prev) / Math.abs(prev) : 0;
+          curCell.appendChild(makeBadgeLocal(pct));
+        }
+        return;
+      }
+
       if (numericCells.length >= 4) {
         const curQCell = numericCells[0];
         const prevQCell = numericCells[1];
@@ -124,8 +186,10 @@ export function annotateTableHTML(html: string, kind: AnnotateKind): string {
     }
 
     if (numericCells.length >= 2) {
-      const curCell = numericCells[0];
-      const prevCell = numericCells[1];
+      const curIdx = yearCount >= 2 && numericCells.length >= yearCount ? (yearAscending ? yearCount - 1 : 0) : 0;
+      const prevIdx = yearCount >= 2 && numericCells.length >= yearCount ? (yearAscending ? yearCount - 2 : 1) : 1;
+      const curCell = numericCells[curIdx];
+      const prevCell = numericCells[prevIdx];
       const cur = parseNumLocal(curCell.textContent);
       const prev = parseNumLocal(prevCell.textContent);
       if (cur == null || prev == null || cellHasBadge(curCell)) return;
