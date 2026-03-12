@@ -4,7 +4,7 @@ from typing import Any, cast
 
 import pytest
 
-from backend.analyzer import parse_number, run_analysis
+from backend.analyzer import extract_metrics, parse_number, run_analysis
 
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
@@ -150,3 +150,11 @@ def test_sections_strip_boilerplate_paragraphs(monkeypatch: pytest.MonkeyPatch) 
     sections = cast(dict[str, Any], result["sections"])
     assert sections.get("mdna") is None
     assert sections.get("risk_factors") is None
+
+
+def test_balance_sheet_year_order_prefers_latest_as_current() -> None:
+    balance_html = _read_fixture("balance_sheet_year_order.html")
+    metrics = extract_metrics(income_html=None, balance_html=balance_html, cashflow_html=None)
+    assets = metrics["total_assets"]
+    assert assets["current"] == 595281.0
+    assert assets["previous"] == 450256.0
