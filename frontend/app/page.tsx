@@ -50,6 +50,18 @@ function Pager(props: {
   );
 }
 
+function formatLastUpdated(value: string | undefined) {
+  if (!value) return "-";
+  const trimmed = value.trim();
+  const parts = trimmed.split("T");
+  if (parts.length === 2) {
+    const date = parts[0];
+    const time = parts[1].split(".")[0].split("Z")[0];
+    return `${date} ${time}`;
+  }
+  return trimmed;
+}
+
 export default function Dashboard() {
   const [ticker, setTicker] = useState("AAPL");
   const [form, setForm] = useState<FilingForm>("10-Q");
@@ -492,7 +504,7 @@ export default function Dashboard() {
               </p>
             )}
             <p className="mt-1 text-xs text-gray-400">
-              Last updated: {data.last_updated}
+              Last updated: {formatLastUpdated(data.last_updated)}
             </p>
           </div>
 
