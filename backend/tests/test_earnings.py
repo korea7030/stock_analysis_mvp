@@ -16,6 +16,32 @@ class _FakeResponse:
         return self._payload
 
 
+def test_sec_company_filings_url_uses_cik_mapping(monkeypatch):
+    monkeypatch.setattr(clients, "_limiter_acquire", lambda *_args, **_kwargs: None)
+
+    def _fake_get(_url, *, headers, timeout):
+        assert "User-Agent" in headers
+        assert timeout
+        return _FakeResponse(
+            status_code=200,
+            payload={
+                "0": {"cik_str": 320193, "ticker": "AAPL", "title": "Apple Inc."},
+                "1": {"cik_str": 1067983, "ticker": "BRK-B", "title": "Berkshire Hathaway Inc."},
+            },
+        )
+
+    monkeypatch.setattr(clients.requests, "get", _fake_get)
+
+    url = clients.sec_company_filings_url(ticker="AAPL", form_type="8-K")
+    assert url is not None
+    assert "CIK=0000320193" in url
+    assert "type=8-K" in url
+
+    url2 = clients.sec_company_filings_url(ticker="brk.b", form_type="8-K")
+    assert url2 is not None
+    assert "CIK=0001067983" in url2
+
+
 def test_nasdaq_get_earnings_for_date_reported(monkeypatch):
     monkeypatch.setattr(clients, "_limiter_acquire", lambda *_args, **_kwargs: None)
 

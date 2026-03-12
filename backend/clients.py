@@ -99,6 +99,74 @@ def sec_get_filing_html(dl: Any, *, ticker: str, form: str, timeout_s: int = 30)
 
 _SEC_INDEX_CACHE: TTLCache[dict[str, Any]] = TTLCache()
 
+_SEC_TICKER_MAP_CACHE: TTLCache[dict[str, str]] = TTLCache()
+
+
+def _sec_headers() -> dict[str, str]:
+    return {"User-Agent": "Stock Analysis MVP korea7030.jhl@gmail.com"}
+
+
+def _normalize_ticker_for_sec(symbol: str) -> str:
+    return symbol.strip().upper().replace(".", "-").replace("/", "-")
+
+
+def sec_ticker_to_cik(ticker: str | None) -> str | None:
+    if ticker is None:
+        return None
+    normalized = _normalize_ticker_for_sec(ticker)
+    if not normalized:
+        return None
+
+    cache_key = "sec_company_tickers"
+    mapping = _SEC_TICKER_MAP_CACHE.get(cache_key)
+    if mapping is None:
+        url = "https://www.sec.gov/files/company_tickers.json"
+
+        def _call() -> dict[str, str]:
+            t0 = time.time()
+            _limiter_acquire(SEC_LIMITER, "sec")
+            waited_s = time.time() - t0
+            rate_limited = waited_s >= 0.01
+            print(f"[sec_ticker_map] fetch rate_limited={rate_limited} waited_s={waited_s:.3f}")
+            r = requests.get(url, headers=_sec_headers(), timeout=20)
+            if r.status_code != 200:
+                raise HttpStatusError(r.status_code, f"HTTP {r.status_code}")
+            payload = r.json()
+            out: dict[str, str] = {}
+            if isinstance(payload, dict):
+                for item in payload.values():
+                    if not isinstance(item, dict):
+                        continue
+                    t = item.get("ticker")
+                    c = item.get("cik_str")
+                    if not t or c is None:
+                        continue
+                    key = _normalize_ticker_for_sec(str(t))
+                    out[key] = str(c).zfill(10)
+            return out
+
+        mapping = _retry(_call, attempts=3, base_sleep_s=0.5, max_sleep_s=4.0, label="sec_ticker_map")
+        _SEC_TICKER_MAP_CACHE.set(cache_key, mapping, ttl_s=86400)
+
+    cik = mapping.get(normalized)
+    if cik:
+        return cik
+    return mapping.get(ticker.strip().upper())
+
+
+def sec_company_filings_url(*, ticker: str | None, form_type: str) -> str | None:
+    cik = sec_ticker_to_cik(ticker)
+    if cik is None:
+        return None
+    params = {
+        "action": "getcompany",
+        "CIK": cik,
+        "type": form_type,
+        "owner": "exclude",
+        "count": "40",
+    }
+    return "https://www.sec.gov/cgi-bin/browse-edgar?" + urllib.parse.urlencode(params)
+
 
 def sec_get_filing_metadatas(
     dl: Any,
@@ -263,11 +331,7 @@ def marketbeat_get_weekly_earnings(timeout_s: int = 10) -> list[dict[str, Any]]:
                 return cleaned in {"", "-", "—", "N/A"}
 
             status = "reported" if (not _is_missing(eps_actual) or not _is_missing(revenue_actual)) else "upcoming"
-            earnings_release_url = (
-                f"https://www.sec.gov/cgi-bin/browse-edgar?CIK={urllib.parse.quote_plus(ticker)}&type=8-K"
-                if ticker
-                else None
-            )
+            earnings_release_url = sec_company_filings_url(ticker=ticker, form_type="8-K")
             transcript_search_url = seekingalpha_transcripts_url(ticker)
 
             earnings.append(
@@ -406,11 +470,7 @@ def nasdaq_get_earnings_for_date(
                 today=today,
                 now_et=now_et,
             )
-            earnings_release_url = (
-                f"https://www.sec.gov/cgi-bin/browse-edgar?CIK={urllib.parse.quote_plus(ticker)}&type=8-K"
-                if ticker
-                else None
-            )
+            earnings_release_url = sec_company_filings_url(ticker=ticker, form_type="8-K")
             transcript_search_url = seekingalpha_transcripts_url(ticker)
 
             out.append(
