@@ -97,3 +97,21 @@ def test_toc_only_does_not_select_income_statement(monkeypatch: pytest.MonkeyPat
     result = cast(dict[str, Any], run_analysis("AAPL", "10-K"))
     tables = cast(dict[str, Any], result["tables"])
     assert tables.get("income_statement") is None
+
+
+def test_mdna_skips_toc_and_returns_body_text(monkeypatch: pytest.MonkeyPatch) -> None:
+    fixture_html = _read_fixture("toc_then_mdna.html")
+
+    def _fake_sec_html(*_args: object, **_kwargs: object) -> str:
+        return fixture_html
+
+    monkeypatch.setattr(
+        "backend.analyzer.sec_get_filing_html",
+        _fake_sec_html,
+    )
+
+    result = cast(dict[str, Any], run_analysis("AAPL", "10-K"))
+    sections = cast(dict[str, Any], result["sections"])
+    mdna = str(sections.get("mdna") or "").lower()
+    assert "this section provides management" in mdna
+    assert "table of contents" not in mdna

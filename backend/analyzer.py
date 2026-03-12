@@ -583,20 +583,65 @@ def _normalize_text_block(text: str) -> str:
     return cleaned.strip()
 
 
+def _is_toc_like_snippet(section: str) -> bool:
+    lowered = section.lower()
+    if "table of contents" in lowered:
+        return True
+    if re.search(r"\.{2,}\s*\d+\s*$", section) is not None:
+        return True
+    if len(section) < 250:
+        return True
+    digits = sum(1 for ch in section if ch.isdigit())
+    letters = sum(1 for ch in section if ch.isalpha())
+    if digits >= 20 and letters < digits:
+        return True
+
+    return False
+
+
 def _extract_section(text: str, patterns: list[str]) -> str | None:
     lower = text.lower()
-    start = -1
+    indices: list[int] = []
     for pat in patterns:
-        idx = lower.find(pat)
-        if idx != -1 and (start == -1 or idx < start):
-            start = idx
-    if start == -1:
+        start = 0
+        while True:
+            idx = lower.find(pat, start)
+            if idx == -1:
+                break
+            indices.append(idx)
+            start = idx + max(1, len(pat))
+
+    if not indices:
         return None
+
+    indices = sorted(set(indices))
     item_re = re.compile(r"\bitem\s+\d+[a-z]?\b", re.IGNORECASE)
-    next_match = item_re.search(lower, start + 5)
-    end = next_match.start() if next_match else len(text)
-    section = text[start:end].strip()
-    return section[:8000]
+
+    best: str | None = None
+    best_len = -1
+    for idx in indices:
+        next_match = item_re.search(lower, idx + 5)
+        end = next_match.start() if next_match else len(text)
+        section = text[idx:end].strip()
+        if not section:
+            continue
+        clipped = section[:8000]
+        if _is_toc_like_snippet(clipped):
+            continue
+        return clipped
+
+    for idx in indices:
+        next_match = item_re.search(lower, idx + 5)
+        end = next_match.start() if next_match else len(text)
+        section = text[idx:end].strip()
+        if not section:
+            continue
+        clipped = section[:8000]
+        if len(clipped) > best_len:
+            best = clipped
+            best_len = len(clipped)
+
+    return best
 
 
 def _diff_text(prev: str | None, curr: str | None) -> str | None:
@@ -617,6 +662,12 @@ def extract_sections(
     meta: MetaDict | None = None,
 ) -> dict[str, str | None]:
     soup = BeautifulSoup(html, "lxml")
+
+    for table in soup.find_all("table"):
+        table_text = table.get_text(" ", strip=True).lower()
+        if "table of contents" in table_text and table_text.count("item ") >= 3:
+            table.decompose()
+            break
     text = soup.get_text("\n")
     text = _normalize_text_block(text)
 
