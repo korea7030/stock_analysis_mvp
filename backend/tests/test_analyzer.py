@@ -138,3 +138,30 @@ def test_sections_avoid_cross_reference_boilerplate(monkeypatch: pytest.MonkeyPa
     assert "assumes no obligation" not in risk
     assert "net sales increased" in mdna
     assert "see item 7 of this form" not in mdna
+
+
+def test_sections_strip_boilerplate_paragraphs(monkeypatch: pytest.MonkeyPatch) -> None:
+    fixture_html = _read_fixture("sections_with_boilerplate_inside.html")
+
+    def _fake_sec_html(*_args: object, **_kwargs: object) -> str:
+        return fixture_html
+
+    monkeypatch.setattr(
+        "backend.analyzer.sec_get_filing_html",
+        _fake_sec_html,
+    )
+
+    result = cast(dict[str, Any], run_analysis("AAPL", "10-K"))
+    sections = cast(dict[str, Any], result["sections"])
+
+    risk = str(sections.get("risk_factors") or "").lower()
+    mdna = str(sections.get("mdna") or "").lower()
+
+    assert "we face intense competition" in risk
+    assert "forward-looking statements" not in risk
+    assert "fiscal calendar" not in risk
+    assert "assumes no obligation" not in risk
+
+    assert "net sales increased" in mdna
+    assert "refers collectively" not in mdna
+    assert "references to particular years" not in mdna
