@@ -78,6 +78,20 @@ def pct_change(curr: float, prev: float) -> float | None:
     return (curr - prev) / abs(prev) * 100.0
 
 
+def _iter_row_numeric_cells(row):
+    # iXBRL 공시는 모든 실제 재무 숫자를 <ix:nonfraction>으로 태깅하므로,
+    # 라벨 셀의 각주 번호 "(1)"이 음수로 잘못 잡히지 않도록 그 시그널을 우선 신뢰한다.
+    has_ix = bool(row.find("ix:nonfraction"))
+    for td in row.find_all("td"):
+        if has_ix and not td.find("ix:nonfraction"):
+            continue
+        txt = td.get_text(" ", strip=True)
+        val = parse_number(txt)
+        if val is None:
+            continue
+        yield td, val
+
+
 # ----------------------------
 # Income Statement Badge
 # ----------------------------
@@ -93,12 +107,7 @@ def annotate_income_html(income_html: str) -> str:
         if not tds:
             continue
 
-        numeric_cells = []
-        for td in tds:
-            txt = td.get_text(" ", strip=True)
-            val = parse_number(txt)
-            if val is not None:
-                numeric_cells.append((td, val))
+        numeric_cells = list(_iter_row_numeric_cells(tr))
 
         # 반드시 4개 (3M curr / prev, 9M curr / prev)
         if len(numeric_cells) < 4:
@@ -433,13 +442,7 @@ def extract_raw_tables(html):
 
 
 def _row_numeric_values(row) -> list[float]:
-    values: list[float] = []
-    for cell in row.find_all("td"):
-        txt = cell.get_text(" ", strip=True)
-        val = parse_number(txt)
-        if val is not None:
-            values.append(val)
-    return values
+    return [val for _td, val in _iter_row_numeric_cells(row)]
 
 
 _year_re = re.compile(r"\b(19|20)\d{2}\b")

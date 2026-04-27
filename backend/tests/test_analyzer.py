@@ -158,3 +158,37 @@ def test_balance_sheet_year_order_prefers_latest_as_current() -> None:
     assets = metrics["total_assets"]
     assert assets["current"] == 595281.0
     assert assets["previous"] == 450256.0
+
+
+def test_income_label_footnote_is_not_treated_as_current_value(monkeypatch: pytest.MonkeyPatch) -> None:
+    fixture_html = _read_fixture("income_label_with_footnote.html")
+
+    def _fake_sec_html(*_args: object, **_kwargs: object) -> str:
+        return fixture_html
+
+    monkeypatch.setattr(
+        "backend.analyzer.sec_get_filing_html",
+        _fake_sec_html,
+    )
+
+    result = cast(dict[str, Any], run_analysis("PGY", "10-Q"))
+    metrics = cast(dict[str, Any], result["metrics"])
+
+    revenue = metrics["revenue"]
+    assert revenue["current"] == 339887.0
+    assert revenue["previous"] == 249283.0
+
+    net_income = metrics["net_income"]
+    assert net_income["current"] == 23273.0
+    assert net_income["previous"] == -74231.0
+
+    income_html = cast(dict[str, Any], result["tables"])["income_statement"] or ""
+    revenue_row = ""
+    for line in income_html.splitlines():
+        if "Revenue from fees" in line:
+            revenue_row = line
+            break
+    if not revenue_row:
+        # 셀이 멀티라인일 수 있어 통째로 비교
+        revenue_row = income_html
+    assert "▼ -100.0%" not in revenue_row
