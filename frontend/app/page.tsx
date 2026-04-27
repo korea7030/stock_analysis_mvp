@@ -7,6 +7,39 @@ import type { AnalyzeResponse, EarningsItem, FilingForm, MetricValue } from "@/l
 import { annotateTableHTML } from "@/lib/filingTables";
 
 const EARNINGS_PAGE_SIZE = 8;
+const FILING_FORMS: readonly FilingForm[] = ["10-Q", "10-K", "6-K", "8-K", "20-F"];
+const FAVORITES_KEY = "stock-analysis-mvp:favorites";
+const RECENT_KEY = "stock-analysis-mvp:recent";
+const RECENT_MAX = 8;
+
+function isFilingForm(value: string | null | undefined): value is FilingForm {
+  return !!value && (FILING_FORMS as readonly string[]).includes(value);
+}
+
+function readTickerList(key: string): string[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = window.localStorage.getItem(key);
+    if (!raw) return [];
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((x): x is string => typeof x === "string")
+      .map((x) => x.trim().toUpperCase())
+      .filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+function writeTickerList(key: string, list: string[]) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(key, JSON.stringify(list));
+  } catch {
+    // localStorage 용량 초과/접근 거부 무시
+  }
+}
 
 function clampPage(page: number, totalPages: number) {
   if (totalPages <= 1) return 1;
@@ -33,10 +66,10 @@ function Pager(props: {
         onClick={() => props.onChange(Math.max(1, props.page - 1))}
         disabled={props.page <= 1}
       >
-        Prev
+        이전
       </button>
       <div className="text-xs text-slate-500">
-        {start}-{end} of {props.totalItems} · Page {props.page}/{totalPages}
+        {start}-{end} / 총 {props.totalItems} · {props.page}/{totalPages} 페이지
       </div>
       <button
         type="button"
@@ -44,7 +77,7 @@ function Pager(props: {
         onClick={() => props.onChange(Math.min(totalPages, props.page + 1))}
         disabled={props.page >= totalPages}
       >
-        Next
+        다음
       </button>
     </div>
   );
@@ -73,7 +106,11 @@ export default function Dashboard() {
   const [reportedPage, setReportedPage] = useState(1);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [errorCode, setErrorCode] = useState<string | null>(null);
   const [inputError, setInputError] = useState<string | null>(null);
+  const [pendingAutoAnalyze, setPendingAutoAnalyze] = useState(false);
+  const [favorites, setFavorites] = useState<string[]>([]);
+  const [recent, setRecent] = useState<string[]>([]);
 
   const defaultApiBase =
     process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
@@ -118,6 +155,66 @@ export default function Dashboard() {
       active = false;
     };
   }, []);
+
+  // 첫 마운트 시 URL 쿼리에서 ticker/form 을 복원하고, ticker 가 있으면 자동 분석 예약
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    const t = params.get("ticker")?.trim().toUpperCase();
+    const f = params.get("form")?.trim();
+    if (t) setTicker(t);
+    if (isFilingForm(f)) setForm(f);
+    if (t) setPendingAutoAnalyze(true);
+  }, []);
+
+  // 첫 마운트 시 localStorage 에서 즐겨찾기/최근 본 종목 복원
+  useEffect(() => {
+    setFavorites(readTickerList(FAVORITES_KEY));
+    setRecent(readTickerList(RECENT_KEY));
+  }, []);
+
+  useEffect(() => {
+    writeTickerList(FAVORITES_KEY, favorites);
+  }, [favorites]);
+
+  useEffect(() => {
+    writeTickerList(RECENT_KEY, recent);
+  }, [recent]);
+
+  function toggleFavorite(t: string) {
+    const upper = t.trim().toUpperCase();
+    if (!upper) return;
+    setFavorites((prev) =>
+      prev.includes(upper) ? prev.filter((x) => x !== upper) : [...prev, upper]
+    );
+    // 즐겨찾기에 추가되면 "최근" 에서는 빼서 중복 노출을 막음
+    setRecent((prev) => prev.filter((x) => x !== upper));
+  }
+
+  function selectTicker(t: string) {
+    const upper = t.trim().toUpperCase();
+    if (!upper) return;
+    setTicker(upper);
+    setInputError(null);
+    setPendingAutoAnalyze(true);
+  }
+
+  // ticker / form 변경 시 URL 쿼리스트링과 동기화 (replaceState 로 히스토리 오염 방지)
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const url = new URL(window.location.href);
+    if (ticker.trim()) {
+      url.searchParams.set("ticker", ticker.trim());
+    } else {
+      url.searchParams.delete("ticker");
+    }
+    url.searchParams.set("form", form);
+    const next = url.pathname + url.search + url.hash;
+    const current = window.location.pathname + window.location.search + window.location.hash;
+    if (next !== current) {
+      window.history.replaceState(null, "", next);
+    }
+  }, [ticker, form]);
 
   useEffect(() => {
     let active = true;
@@ -193,6 +290,17 @@ export default function Dashboard() {
     reportedPage * EARNINGS_PAGE_SIZE
   );
 
+  // URL 로 진입한 경우 apiBaseUrl 안정화 후 한 번 자동 분석
+  useEffect(() => {
+    if (!pendingAutoAnalyze) return;
+    if (!ticker.trim()) return;
+    if (!isValidBaseUrl(normalizeBaseUrl(apiBaseUrl))) return;
+    setPendingAutoAnalyze(false);
+    analyze();
+    // analyze 는 ticker/form/apiBaseUrl 을 closure 로 사용하므로 deps 에 안 넣음
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingAutoAnalyze, ticker, form, apiBaseUrl]);
+
   async function analyze() {
     if (!ticker.trim()) {
       setInputError("Ticker를 입력하세요");
@@ -202,6 +310,7 @@ export default function Dashboard() {
     try {
       setLoading(true);
       setError(null);
+      setErrorCode(null);
       setData(null);
 
       const baseUrl = normalizeBaseUrl(apiBaseUrl);
@@ -213,22 +322,34 @@ export default function Dashboard() {
       );
       if (!res.ok) {
         let errorMessage = "요청에 실패했습니다";
-        if (res.status === 404) {
-          errorMessage = "해당 보고서를 찾을 수 없습니다";
-        } else {
-          try {
-            const payload = (await res.json()) as { message?: string };
-            if (payload?.message) {
-              errorMessage = payload.message;
-            }
-          } catch {
+        let code: string | null = null;
+        try {
+          const payload = (await res.json()) as { message?: string; code?: string };
+          if (payload?.message) errorMessage = payload.message;
+          if (payload?.code) code = payload.code;
+        } catch {
+          if (res.status === 404) {
+            errorMessage = "해당 보고서를 찾을 수 없습니다";
+            code = "not_found";
+          } else {
             errorMessage = `HTTP ${res.status}`;
           }
         }
+        setErrorCode(code);
         throw new Error(errorMessage);
       }
       const json: AnalyzeResponse = await res.json();
       setData(json);
+
+      // 분석 성공 시 즐겨찾기에 없는 ticker 만 "최근 본 종목" 에 기록
+      const upperTicker = ticker.trim().toUpperCase();
+      if (upperTicker) {
+        setRecent((prev) => {
+          if (favorites.includes(upperTicker)) return prev;
+          const filtered = prev.filter((x) => x !== upperTicker);
+          return [upperTicker, ...filtered].slice(0, RECENT_MAX);
+        });
+      }
     } catch (e) {
       const message = e instanceof Error ? e.message : "Request failed";
       setError(message);
@@ -284,7 +405,23 @@ export default function Dashboard() {
       {/* 입력 영역 */}
       <div className="bg-white rounded-xl shadow p-4 flex flex-wrap gap-4 items-center">
         <div className="flex flex-col">
-          <span className="text-xs text-gray-500 mb-1">Ticker</span>
+          <div className="flex items-center justify-between mb-1 gap-2">
+            <span className="text-xs text-gray-500">Ticker</span>
+            <button
+              type="button"
+              onClick={() => toggleFavorite(ticker)}
+              disabled={!ticker.trim()}
+              className="text-sm leading-none disabled:opacity-30 hover:scale-110 transition-transform"
+              aria-label="즐겨찾기 토글"
+              title={
+                favorites.includes(ticker.trim().toUpperCase())
+                  ? "즐겨찾기 해제"
+                  : "즐겨찾기 추가"
+              }
+            >
+              {favorites.includes(ticker.trim().toUpperCase()) ? "★" : "☆"}
+            </button>
+          </div>
           <input
             value={ticker}
             onChange={(e) => {
@@ -315,46 +452,17 @@ export default function Dashboard() {
         <div className="flex flex-col">
           <span className="text-xs text-gray-500 mb-1">Form</span>
           <div className="flex flex-wrap gap-4 items-center">
-            <label className="flex gap-1 items-center text-sm">
-              <input
-                type="radio"
-                checked={form === "10-Q"}
-                onChange={() => setForm("10-Q")}
-              />
-              10-Q
-            </label>
-            <label className="flex gap-1 items-center text-sm">
-              <input
-                type="radio"
-                checked={form === "10-K"}
-                onChange={() => setForm("10-K")}
-              />
-              10-K
-            </label>
-            <label className="flex gap-1 items-center text-sm">
-              <input
-                type="radio"
-                checked={form === "6-K"}
-                onChange={() => setForm("6-K")}
-              />
-              6-K
-            </label>
-            <label className="flex gap-1 items-center text-sm">
-              <input
-                type="radio"
-                checked={form === "8-K"}
-                onChange={() => setForm("8-K")}
-              />
-              8-K
-            </label>
-            <label className="flex gap-1 items-center text-sm">
-              <input
-                type="radio"
-                checked={form === "20-F"}
-                onChange={() => setForm("20-F")}
-              />
-              20-F
-            </label>
+            {FILING_FORMS.map((f) => (
+              <label key={f} className="flex gap-1 items-center text-sm">
+                <input
+                  type="radio"
+                  name="filing-form"
+                  checked={form === f}
+                  onChange={() => setForm(f)}
+                />
+                {f}
+              </label>
+            ))}
           </div>
         </div>
 
@@ -363,13 +471,79 @@ export default function Dashboard() {
           className="ml-auto bg-black text-white px-4 py-2 rounded hover:bg-gray-800 disabled:opacity-60"
           disabled={loading}
         >
-          {loading ? "Loading..." : "Analyze"}
+          {loading ? "분석 중..." : "분석"}
         </button>
       </div>
 
+      {(favorites.length > 0 || recent.length > 0) && (
+        <div className="bg-white rounded-xl shadow p-3 space-y-2">
+          {favorites.length > 0 && (
+            <div className="flex flex-wrap gap-2 items-center">
+              <span className="text-xs text-slate-500 mr-1">★ 즐겨찾기</span>
+              {favorites.map((t) => (
+                <span
+                  key={t}
+                  className="inline-flex items-center text-xs border rounded-full bg-amber-50 border-amber-200"
+                >
+                  <button
+                    type="button"
+                    onClick={() => selectTicker(t)}
+                    className="font-medium text-amber-800 hover:underline pl-2 pr-1 py-0.5"
+                  >
+                    {t}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => toggleFavorite(t)}
+                    aria-label={`${t} 즐겨찾기 제거`}
+                    title="즐겨찾기 제거"
+                    className="text-amber-700 hover:text-amber-900 px-1.5 py-0.5"
+                  >
+                    ×
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
+          {recent.length > 0 && (
+            <div className="flex flex-wrap gap-2 items-center">
+              <span className="text-xs text-slate-500 mr-1">최근</span>
+              {recent.map((t) => (
+                <button
+                  key={t}
+                  type="button"
+                  onClick={() => selectTicker(t)}
+                  className="text-xs border rounded-full px-2 py-0.5 hover:bg-slate-50"
+                >
+                  {t}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       {error && (
         <div className="bg-red-50 text-red-700 border border-red-200 rounded p-3 text-sm">
-          {error}
+          <p>{error}</p>
+          {errorCode === "no_financial_data" && (
+            <div className="mt-2 flex flex-wrap gap-2 items-center">
+              <span className="text-xs text-red-600">다른 보고서로 다시 시도:</span>
+              {FILING_FORMS.filter((f) => f !== form).map((f) => (
+                <button
+                  key={f}
+                  type="button"
+                  onClick={() => {
+                    setForm(f);
+                    setPendingAutoAnalyze(true);
+                  }}
+                  className="text-xs border border-red-300 rounded px-2 py-0.5 bg-white text-red-700 hover:bg-red-100"
+                >
+                  {f}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
@@ -377,26 +551,28 @@ export default function Dashboard() {
         <div className="lg:col-span-4 space-y-6">
           <div className="bg-white rounded-xl shadow p-5">
             <div className="flex items-center justify-between">
-              <h2 className="text-lg font-semibold">Earnings This Week</h2>
+              <h2 className="text-lg font-semibold">이번 주 실적 발표</h2>
                 <a
                   className="text-xs text-slate-500 hover:underline"
                   href="https://www.nasdaq.com/market-activity/earnings"
                   target="_blank"
                   rel="noreferrer"
                 >
-                Source
+                출처
               </a>
             </div>
-            {earningsLoading && <p className="text-sm text-slate-500 mt-3">Loading...</p>}
-            {earningsError && <p className="text-sm text-red-600 mt-3">{earningsError}</p>}
+            {earningsLoading && <p className="text-sm text-slate-500 mt-3">불러오는 중...</p>}
+            {earningsError && (
+              <p className="text-sm text-red-600 mt-3">실적 데이터를 불러오지 못했습니다.</p>
+            )}
             {!earningsLoading && !earningsError && earnings && earnings.length === 0 && (
-              <p className="text-sm text-slate-500 mt-3">No earnings found.</p>
+              <p className="text-sm text-slate-500 mt-3">이번 주 발표 예정/완료된 실적이 없습니다.</p>
             )}
 
             {earnings && earnings.length > 0 && (
               <div className="mt-4 space-y-4">
                 <div>
-                  <div className="text-xs font-medium text-slate-500">Upcoming</div>
+                  <div className="text-xs font-medium text-slate-500">발표 예정</div>
                   <div className="mt-2 space-y-2">
                     {upcomingPageItems.map((it, idx) => (
                       <div key={`${it.ticker || "x"}-${idx}`} className="border rounded-lg p-3">
@@ -431,7 +607,7 @@ export default function Dashboard() {
                 </div>
 
                 <div>
-                  <div className="text-xs font-medium text-slate-500">Reported</div>
+                  <div className="text-xs font-medium text-slate-500">발표 완료</div>
                   <div className="mt-2 space-y-2">
                     {reportedPageItems.map((it, idx) => (
                       <div key={`${it.ticker || "y"}-${idx}`} className="border rounded-lg p-3 bg-slate-50">
@@ -474,21 +650,38 @@ export default function Dashboard() {
         </div>
 
         <div className="lg:col-span-8 space-y-6">
+          {loading && !data && (
+            <>
+              <div className="bg-white rounded-xl shadow p-5 animate-pulse">
+                <div className="h-5 w-24 bg-slate-200 rounded mb-3" />
+                <div className="h-4 w-3/4 bg-slate-100 rounded mb-2" />
+                <div className="h-4 w-1/2 bg-slate-100 rounded" />
+                <p className="text-xs text-slate-500 mt-4 not-italic">
+                  SEC 에서 보고서를 받아 파싱하는 중입니다. 첫 호출은 수십 초가 걸릴 수 있어요.
+                </p>
+              </div>
+              <div className="bg-white rounded-xl shadow p-5 animate-pulse">
+                <div className="h-5 w-32 bg-slate-200 rounded mb-3" />
+                {Array.from({ length: 6 }).map((_, i) => (
+                  <div key={i} className="h-3 w-full bg-slate-100 rounded mb-2" />
+                ))}
+              </div>
+            </>
+          )}
           {data && (
             <>
           {/* 메타 */}
           <div className="bg-white rounded-xl shadow p-5">
-            <h2 className="text-xl font-semibold mb-1">Meta</h2>
+            <h2 className="text-xl font-semibold mb-1">개요</h2>
             <p className="font-medium">
               {data.meta.company_name} ({data.meta.ticker})
             </p>
             <p className="text-sm text-gray-600">
-              {data.meta.report_type} · Period End: {data.meta.period_end} ·
-              Unit: {data.meta.unit}
+              {data.meta.report_type ?? "-"} · 기준일 {data.meta.period_end ?? "-"} · 단위 {data.meta.unit ?? "-"}
             </p>
             {(data.meta.filing_date || data.meta.accession_number) && (
               <p className="mt-1 text-xs text-gray-500">
-                Filing: {data.meta.filing_date || "-"} · Accession: {data.meta.accession_number || "-"}
+                공시일 {data.meta.filing_date || "-"} · Accession {data.meta.accession_number || "-"}
               </p>
             )}
             {data.meta.source_url && (
@@ -499,25 +692,36 @@ export default function Dashboard() {
                   target="_blank"
                   rel="noreferrer"
                 >
-                  Source document
+                  원본 문서 보기
                 </a>
               </p>
             )}
             <p className="mt-1 text-xs text-gray-400">
-              Last updated: {formatLastUpdated(data.last_updated)}
+              최근 갱신: {formatLastUpdated(data.last_updated)}
             </p>
           </div>
 
           {data.metrics && (
             <div className="bg-white rounded-xl shadow p-5 overflow-x-auto">
-              <h2 className="text-xl font-semibold mb-3">Key Metrics</h2>
+              <div className="flex items-baseline justify-between gap-2 flex-wrap">
+                <h2 className="text-xl font-semibold">주요 지표</h2>
+                <div className="text-xs text-slate-500">
+                  {data.meta.report_type && <span>{data.meta.report_type}</span>}
+                  {data.meta.period_end && <span> · 기준일 {data.meta.period_end}</span>}
+                  {data.meta.unit && <span> · 단위 {data.meta.unit}</span>}
+                </div>
+              </div>
+              <p className="text-xs text-slate-500 mt-1 mb-3">
+                Current = 가장 최근 보고 기간, Previous = 직전 동기간
+                (10-Q 는 동분기, 10-K 는 동연도, 재무상태표는 직전 회계연도 말).
+              </p>
               <table>
                 <thead>
                   <tr>
-                    <th className="text-left">Metric</th>
+                    <th className="text-left">지표</th>
                     <th className="text-right">Current</th>
                     <th className="text-right">Previous</th>
-                    <th className="text-right">Change</th>
+                    <th className="text-right">변동률</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -596,7 +800,12 @@ export default function Dashboard() {
           {/* Income */}
           {data.tables?.income_statement && (
             <div className="bg-white rounded-xl shadow p-5 overflow-x-auto">
-              <h2 className="text-xl font-bold mb-3">Income Statement</h2>
+              <div className="flex items-baseline justify-between gap-2 flex-wrap mb-3">
+                <h2 className="text-xl font-bold">손익계산서</h2>
+                {data.meta.unit && (
+                  <span className="text-xs text-slate-500">단위 {data.meta.unit}</span>
+                )}
+              </div>
               <div
                 dangerouslySetInnerHTML={{
                   __html: annotateTableHTML(sanitizeHtml(data.tables.income_statement), "income"),
@@ -608,7 +817,12 @@ export default function Dashboard() {
           {/* Balance */}
           {data.tables?.balance_sheet && (
             <div className="bg-white rounded-xl shadow p-5 overflow-x-auto">
-              <h2 className="text-xl font-bold mb-3">Balance Sheet</h2>
+              <div className="flex items-baseline justify-between gap-2 flex-wrap mb-3">
+                <h2 className="text-xl font-bold">재무상태표</h2>
+                {data.meta.unit && (
+                  <span className="text-xs text-slate-500">단위 {data.meta.unit}</span>
+                )}
+              </div>
               <div
                 dangerouslySetInnerHTML={{
                   __html: annotateTableHTML(sanitizeHtml(data.tables.balance_sheet), "balance"),
@@ -620,7 +834,12 @@ export default function Dashboard() {
           {/* Cash Flow */}
           {data.tables?.cash_flow && (
             <div className="bg-white rounded-xl shadow p-5 overflow-x-auto">
-              <h2 className="text-xl font-bold mb-3">Cash Flow</h2>
+              <div className="flex items-baseline justify-between gap-2 flex-wrap mb-3">
+                <h2 className="text-xl font-bold">현금흐름표</h2>
+                {data.meta.unit && (
+                  <span className="text-xs text-slate-500">단위 {data.meta.unit}</span>
+                )}
+              </div>
               <div
                 dangerouslySetInnerHTML={{
                   __html: annotateTableHTML(sanitizeHtml(data.tables.cash_flow), "cash"),
