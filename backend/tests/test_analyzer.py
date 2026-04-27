@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import Any, cast
 
 import pytest
+from bs4 import BeautifulSoup
 
 from backend.analyzer import extract_metrics, parse_number, run_analysis
 
@@ -192,3 +193,44 @@ def test_income_label_footnote_is_not_treated_as_current_value(monkeypatch: pyte
         # 셀이 멀티라인일 수 있어 통째로 비교
         revenue_row = income_html
     assert "▼ -100.0%" not in revenue_row
+
+
+def test_income_ascending_year_columns_produces_positive_badges(monkeypatch: pytest.MonkeyPatch) -> None:
+    fixture_html = _read_fixture("income_ascending_year_columns.html")
+
+    def _fake_sec_html(*_args: object, **_kwargs: object) -> str:
+        return fixture_html
+
+    monkeypatch.setattr(
+        "backend.analyzer.sec_get_filing_html",
+        _fake_sec_html,
+    )
+
+    result = cast(dict[str, Any], run_analysis("AMZN", "10-Q"))
+    metrics = cast(dict[str, Any], result["metrics"])
+
+    # 메트릭은 _maybe_reverse_by_year_order 로 이미 정상 (현재가 최신)
+    # _find_row_values 가 "sales" 부분문자열로 첫 매칭행 (Net product sales) 을 선택.
+    revenue = metrics["revenue"]
+    assert revenue["current"] == 206274.0
+    assert revenue["previous"] == 190085.0
+    assert revenue["change_pct"] is not None and revenue["change_pct"] > 0
+
+    net_income = metrics["net_income"]
+    assert net_income["current"] == 56478.0
+    assert net_income["previous"] == 39244.0
+    assert net_income["change_pct"] is not None and net_income["change_pct"] > 0
+
+    income_html = cast(dict[str, Any], result["tables"])["income_statement"] or ""
+
+    # 헤더 행(연도만 들어 있는 행) 에는 배지가 박히지 않아야 함
+    soup = BeautifulSoup(income_html, "lxml")
+    for tr in soup.find_all("tr"):
+        cell_texts = [td.get_text(" ", strip=True) for td in tr.find_all("td")]
+        nonempty = [t for t in cell_texts if t]
+        if nonempty and all(t in {"2024", "2025"} for t in nonempty):
+            assert tr.find(class_="delta-badge") is None, "연도 헤더 행에 배지가 박혔습니다"
+
+    # ascending 표라도 데이터 행에는 양수(▲) 배지가 박혀야 함 (▼ 가 아님)
+    assert "▲" in income_html
+    assert "▼" not in income_html

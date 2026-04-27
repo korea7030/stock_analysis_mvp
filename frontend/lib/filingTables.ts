@@ -149,10 +149,13 @@ export function annotateTableHTML(html: string, kind: AnnotateKind): string {
       }
 
       if (numericCells.length >= 4) {
-        const curQCell = numericCells[0];
-        const prevQCell = numericCells[1];
-        const curYCell = numericCells[2];
-        const prevYCell = numericCells[3];
+        // 4 cells = [3M-A, 3M-B, 9M-A, 9M-B] (A·B 는 컬럼 순서)
+        // ascending 이면 A=prev, B=curr / descending 이면 A=curr, B=prev.
+        const ascending = yearCount >= 2 && yearAscending;
+        const curQCell = ascending ? numericCells[1] : numericCells[0];
+        const prevQCell = ascending ? numericCells[0] : numericCells[1];
+        const curYCell = ascending ? numericCells[3] : numericCells[2];
+        const prevYCell = ascending ? numericCells[2] : numericCells[3];
 
         const curQ = parseNumLocal(curQCell.textContent);
         const prevQ = parseNumLocal(prevQCell.textContent);

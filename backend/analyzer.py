@@ -102,6 +102,11 @@ def annotate_income_html(income_html: str) -> str:
 
     soup = BeautifulSoup(income_html, "lxml")
 
+    # 표 전체에서 연도 헤더 순서를 한 번 결정 — 컬럼이 ascending([2024, 2025]) 인 경우
+    # 첫 numeric 셀이 previous, 두 번째가 current 가 됨 (AMZN 같은 케이스).
+    year_order = _infer_year_order(soup)
+    ascending = len(year_order) >= 2 and year_order[0] < year_order[1]
+
     for tr in soup.find_all("tr"):
         tds = tr.find_all("td")
         if not tds:
@@ -113,10 +118,23 @@ def annotate_income_html(income_html: str) -> str:
         if len(numeric_cells) < 4:
             continue
 
-        (td_3m_curr, v3c) = numeric_cells[0]
-        (_, v3p) = numeric_cells[1]
-        (td_9m_curr, v9c) = numeric_cells[2]
-        (_, v9p) = numeric_cells[3]
+        # 연도 헤더 행(예: 2024 | 2025 | 2024 | 2025) 에는 배지를 박지 않는다.
+        # 모든 numeric 값이 1900~2099 범위의 정수이면 헤더 행으로 간주.
+        if all(1900 <= v <= 2099 and float(v).is_integer() for _td, v in numeric_cells):
+            continue
+
+        if ascending:
+            # [3M-prev, 3M-curr, 9M-prev, 9M-curr]
+            (_, v3p) = numeric_cells[0]
+            (td_3m_curr, v3c) = numeric_cells[1]
+            (_, v9p) = numeric_cells[2]
+            (td_9m_curr, v9c) = numeric_cells[3]
+        else:
+            # [3M-curr, 3M-prev, 9M-curr, 9M-prev]
+            (td_3m_curr, v3c) = numeric_cells[0]
+            (_, v3p) = numeric_cells[1]
+            (td_9m_curr, v9c) = numeric_cells[2]
+            (_, v9p) = numeric_cells[3]
 
         def make_badge(pct):
             span = soup.new_tag("span")
