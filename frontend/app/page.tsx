@@ -137,7 +137,7 @@ export default function Dashboard() {
           (window.location.hostname === "localhost" ||
             window.location.hostname === "127.0.0.1");
         const envOverride = process.env.NEXT_PUBLIC_API_BASE_URL?.trim();
-        const resolvedBase = isLocalhost && !envOverride ? localFallbackBase : nextBase;
+        const resolvedBase = envOverride || (isLocalhost ? localFallbackBase : nextBase);
         if (active && resolvedBase && isValidBaseUrl(resolvedBase)) {
           const normalized = normalizeBaseUrl(resolvedBase);
           setApiBaseUrl(normalized);
