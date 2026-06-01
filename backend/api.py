@@ -154,6 +154,8 @@ async def root():
 
 
 @app.get("/health")
+@app.get("/kaithhealthcheck")
+@app.get("/kaithheathcheck")
 async def health():
     return {"status": "ok"}
 
