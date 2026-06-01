@@ -372,6 +372,14 @@ def _fetch_earnings_items() -> list[dict[str, Any]]:
         if isinstance(maybe_earnings, list) and maybe_earnings:
             return _normalize_earnings_items(maybe_earnings)
 
+    allow_live_fallback = os.getenv("CALENDAR_ALLOW_LIVE_EARNINGS_FALLBACK", "false").strip().lower() in {"1", "true", "yes", "on"}
+    if not allow_live_fallback:
+        if _earnings_last_success:
+            print("[calendar] using last_success earnings snapshot (live fallback disabled)")
+            return _normalize_earnings_items(_earnings_last_success)
+        print("[calendar] skip live earnings fallback (CALENDAR_ALLOW_LIVE_EARNINGS_FALLBACK=false)")
+        return []
+
     try:
         payload = get_marketbeat_earnings() if get_marketbeat_earnings else []
     except Exception as e:
@@ -382,11 +390,7 @@ def _fetch_earnings_items() -> list[dict[str, Any]]:
     if payload:
         _earnings_last_success = payload
 
-    normalized: list[dict[str, Any]] = []
-    for item in payload:
-        report_date = (item.get("report_date") or "").strip()
-        normalized.append({**item, "kind": "earnings", "event_date": report_date, "event": "Earnings"})
-    return normalized
+    return _normalize_earnings_items(payload)
 
 
 def _load_economic_items_from_cron() -> list[dict[str, Any]]:
