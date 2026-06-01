@@ -138,7 +138,16 @@ export default function Dashboard() {
           (window.location.hostname === "localhost" ||
             window.location.hostname === "127.0.0.1");
         const envOverride = process.env.NEXT_PUBLIC_API_BASE_URL?.trim();
-        const resolvedBase = envOverride || (isLocalhost ? localFallbackBase : nextBase);
+        const isEnvLocalhost =
+          !!envOverride &&
+          (envOverride.includes("localhost") || envOverride.includes("127.0.0.1"));
+
+        // 배포 환경에서는 runtime config(config.json)를 우선한다.
+        // NEXT_PUBLIC_API_BASE_URL 이 localhost 로 bake-in 된 경우 원격 접속에서 ERR_CONNECTION 을 유발할 수 있다.
+        const resolvedBase = isLocalhost
+          ? envOverride || localFallbackBase
+          : nextBase || (!isEnvLocalhost ? envOverride : undefined);
+
         if (active && resolvedBase && isValidBaseUrl(resolvedBase)) {
           const normalized = normalizeBaseUrl(resolvedBase);
           setApiBaseUrl(normalized);
