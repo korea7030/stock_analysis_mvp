@@ -71,3 +71,11 @@ export type EarningsItem = {
   last_year_eps?: string | null;
   last_year_report_date?: string | null;
 };
+
+export type CalendarItem = EarningsItem & {
+  kind?: "earnings" | "economic" | string | null;
+  event_date?: string | null;
+  event?: string | null;
+  country?: string | null;
+  importance?: string | null;
+};

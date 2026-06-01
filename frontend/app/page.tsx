@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import DOMPurify from "dompurify";
 
-import type { AnalyzeResponse, EarningsItem, FilingForm, MetricValue } from "@/lib/apiTypes";
+import type { AnalyzeResponse, CalendarItem, FilingForm, MetricValue } from "@/lib/apiTypes";
 import { annotateTableHTML } from "@/lib/filingTables";
 
 const EARNINGS_PAGE_SIZE = 8;
@@ -99,11 +99,12 @@ export default function Dashboard() {
   const [ticker, setTicker] = useState("AAPL");
   const [form, setForm] = useState<FilingForm>("10-Q");
   const [data, setData] = useState<AnalyzeResponse | null>(null);
-  const [earnings, setEarnings] = useState<EarningsItem[] | null>(null);
+  const [calendar, setCalendar] = useState<CalendarItem[] | null>(null);
   const [earningsLoading, setEarningsLoading] = useState(false);
   const [earningsError, setEarningsError] = useState<string | null>(null);
   const [upcomingPage, setUpcomingPage] = useState(1);
   const [reportedPage, setReportedPage] = useState(1);
+  const [economicPage, setEconomicPage] = useState(1);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [errorCode, setErrorCode] = useState<string | null>(null);
@@ -225,19 +226,19 @@ export default function Dashboard() {
       setEarningsLoading(true);
       setEarningsError(null);
       try {
-        const er = await fetch(`${baseUrl}/earnings`);
+        const er = await fetch(`${baseUrl}/calendar?weeks=1`);
         if (!er.ok) {
           throw new Error(`HTTP ${er.status}`);
         }
-        const payload = (await er.json()) as EarningsItem[];
+        const payload = (await er.json()) as CalendarItem[];
         if (active) {
-          setEarnings(Array.isArray(payload) ? payload : []);
+          setCalendar(Array.isArray(payload) ? payload : []);
         }
       } catch (e) {
         if (active) {
           const message = e instanceof Error ? e.message : "Failed to load earnings";
           setEarningsError(message);
-          setEarnings([]);
+          setCalendar([]);
         }
       } finally {
         if (active) {
@@ -252,8 +253,11 @@ export default function Dashboard() {
     };
   }, [apiBaseUrl]);
 
-  const upcomingAll = (earnings || []).filter((it) => (it.status || "").toLowerCase() !== "reported");
-  const reportedAll = (earnings || []).filter((it) => (it.status || "").toLowerCase() === "reported");
+  const earnings = (calendar || []).filter((it) => (it.kind || "earnings").toLowerCase() === "earnings");
+  const economic = (calendar || []).filter((it) => (it.kind || "").toLowerCase() === "economic");
+
+  const upcomingAll = earnings.filter((it) => (it.status || "").toLowerCase() !== "reported");
+  const reportedAll = earnings.filter((it) => (it.status || "").toLowerCase() === "reported");
 
   const upcoming = [...upcomingAll].sort((a, b) => {
     const ad = a.report_date || "";
@@ -271,6 +275,7 @@ export default function Dashboard() {
 
   const upcomingTotalPages = Math.max(1, Math.ceil(upcoming.length / EARNINGS_PAGE_SIZE));
   const reportedTotalPages = Math.max(1, Math.ceil(reported.length / EARNINGS_PAGE_SIZE));
+  const economicTotalPages = Math.max(1, Math.ceil(economic.length / EARNINGS_PAGE_SIZE));
 
   useEffect(() => {
     setUpcomingPage((p) => clampPage(p, upcomingTotalPages));
@@ -280,6 +285,10 @@ export default function Dashboard() {
     setReportedPage((p) => clampPage(p, reportedTotalPages));
   }, [reportedTotalPages]);
 
+  useEffect(() => {
+    setEconomicPage((p) => clampPage(p, economicTotalPages));
+  }, [economicTotalPages]);
+
   const upcomingPageItems = upcoming.slice(
     (upcomingPage - 1) * EARNINGS_PAGE_SIZE,
     upcomingPage * EARNINGS_PAGE_SIZE
@@ -287,7 +296,11 @@ export default function Dashboard() {
 
   const reportedPageItems = reported.slice(
     (reportedPage - 1) * EARNINGS_PAGE_SIZE,
-    reportedPage * EARNINGS_PAGE_SIZE
+    reportedPage * EARNINGS_PAGE_SIZE,
+  );
+  const economicPageItems = economic.slice(
+    (economicPage - 1) * EARNINGS_PAGE_SIZE,
+    economicPage * EARNINGS_PAGE_SIZE,
   );
 
   // URL 로 진입한 경우 apiBaseUrl 안정화 후 한 번 자동 분석
@@ -551,7 +564,7 @@ export default function Dashboard() {
         <div className="lg:col-span-4 space-y-6">
           <div className="bg-white rounded-xl shadow p-5">
             <div className="flex items-center justify-between">
-              <h2 className="text-lg font-semibold">이번 주 실적 발표</h2>
+              <h2 className="text-lg font-semibold">이번 주 캘린더 (실적/경제지표)</h2>
                 <a
                   className="text-xs text-slate-500 hover:underline"
                   href="https://www.nasdaq.com/market-activity/earnings"
@@ -622,27 +635,29 @@ export default function Dashboard() {
                           <div>EPS: {it.eps_actual || "-"} / {it.eps_estimate || "-"}</div>
                           <div>Rev: {it.revenue_actual || "-"} / {it.revenue_estimate || "-"}</div>
                         </div>
-                        <div className="flex gap-3 mt-2 text-xs">
-                          {it.earnings_release_url && (
-                            <a className="text-blue-600 hover:underline" href={it.earnings_release_url} target="_blank" rel="noreferrer">
-                              SEC 8-Ks
-                            </a>
-                          )}
-                          {it.transcript_search_url && (
-                            <a className="text-blue-600 hover:underline" href={it.transcript_search_url} target="_blank" rel="noreferrer">
-                              Find Transcript
-                            </a>
-                          )}
-                        </div>
                       </div>
                     ))}
                   </div>
-                  <Pager
-                    page={reportedPage}
-                    totalItems={reported.length}
-                    pageSize={EARNINGS_PAGE_SIZE}
-                    onChange={setReportedPage}
-                  />
+                  <Pager page={reportedPage} totalItems={reported.length} pageSize={EARNINGS_PAGE_SIZE} onChange={setReportedPage} />
+                </div>
+
+                <div>
+                  <div className="text-xs font-medium text-indigo-600">경제지표</div>
+                  <div className="mt-2 space-y-2">
+                    {economicPageItems.map((it, idx) => (
+                      <div key={`${it.event || "ev"}-${idx}`} className="border rounded-lg p-3 bg-indigo-50/40">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="font-medium text-sm">{it.event || "-"}</div>
+                          <div className="text-xs text-slate-500">{it.event_date || "-"}</div>
+                        </div>
+                        <div className="text-xs text-slate-600 mt-1">
+                          {(it.country || "-") + " · " + (it.importance || "-")}
+                        </div>
+                        <div className="text-xs text-slate-600 mt-1 line-clamp-2">{it.company || ""}</div>
+                      </div>
+                    ))}
+                  </div>
+                  <Pager page={economicPage} totalItems={economic.length} pageSize={EARNINGS_PAGE_SIZE} onChange={setEconomicPage} />
                 </div>
               </div>
             )}

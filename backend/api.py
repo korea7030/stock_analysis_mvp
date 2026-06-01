@@ -1,8 +1,11 @@
 import os
 import re
-from datetime import datetime
+import json
+from datetime import date, datetime, timedelta
+from pathlib import Path
 from typing import Any, Optional
 
+from dotenv import load_dotenv
 from fastapi import FastAPI, Query
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -27,6 +30,8 @@ except ImportError:
     get_marketbeat_earnings = None
 
 
+load_dotenv(Path(__file__).resolve().parents[1] / ".env")
+
 app = FastAPI(
     title="SEC Filing Analyzer API",
     version="1.0.0"
@@ -38,6 +43,7 @@ ANALYZE_CACHE_TTL_S = int(os.getenv("ANALYZE_CACHE_TTL_S", "43200"))
 
 _earnings_cache: TTLCache[list[dict[str, Any]]] = TTLCache()
 _earnings_last_success: list[dict[str, Any]] | None = None
+_calendar_cache: TTLCache[list[dict[str, Any]]] = TTLCache()
 _analyze_cache: TTLCache[dict[str, Any]] = TTLCache()
 
 raw_origins = os.getenv("ALLOWED_ORIGINS", "")
@@ -200,6 +206,52 @@ async def earnings():
         return payload
 
 
+@app.get("/calendar", response_model=list[dict[str, Any]])
+async def calendar(
+    weeks: int = Query(1, ge=1, le=4),
+    kind: Optional[str] = Query(None, description="earnings,economic"),
+    status: Optional[str] = Query(None),
+    country: Optional[str] = Query(None),
+    importance: Optional[str] = Query(None),
+    ticker: Optional[str] = Query(None),
+):
+    cache_key = f"calendar:w{weeks}:k={kind or ''}:s={status or ''}:c={country or ''}:i={importance or ''}:t={ticker or ''}"
+    cached_payload = _calendar_cache.get(cache_key)
+    if cached_payload is not None:
+        return cached_payload
+
+    today = date.today()
+    end_date = today + timedelta(days=7 * weeks - 1)
+
+    filter_cfg = _load_calendar_filter_config()
+
+    earnings_items = _fetch_earnings_items()
+    earnings_cap = int(filter_cfg.get("earnings", 6) or 6)
+    earnings_items = earnings_items[:earnings_cap]
+
+    economic_items = _load_economic_items_from_cron()
+    merged = earnings_items + economic_items
+
+    filtered = _filter_calendar_items(
+        merged,
+        start_date=today,
+        end_date=end_date,
+        kind=kind,
+        status=status,
+        country=country,
+        importance=importance,
+        ticker=ticker,
+    )
+    filtered.sort(key=lambda it: ((it.get("event_date") or "9999-99-99"), (it.get("ticker") or it.get("event") or "")))
+
+    desired_total = int(filter_cfg.get("desired_total", 23) or 23)
+    if desired_total > 0:
+        filtered = filtered[:desired_total]
+
+    _calendar_cache.set(cache_key, filtered, EARNINGS_CACHE_TTL_S)
+    return filtered
+
+
 if __name__ == "__main__":
     uvicorn.run("api:app", host="0.0.0.0", port=8000, reload=True)
 
@@ -298,3 +350,234 @@ def _last_updated_if_today(value: Optional[str]) -> Optional[str]:
     if parsed.date() != datetime.now().date():
         return None
     return value
+
+
+def _fetch_earnings_items() -> list[dict[str, Any]]:
+    """
+    우선순위:
+    1) cron 산출물(JSON) earnings
+    2) 기존 marketbeat fallback
+    """
+    global _earnings_last_success
+
+    cron_payload = _load_json_from_env_path("CRON_EARNINGS_CALENDAR_PATH", "backend/data/earnings_calendar.json")
+    if isinstance(cron_payload, list) and cron_payload:
+        return _normalize_earnings_items(cron_payload)
+
+    combined_payload = _load_json_from_env_path("CRON_CALENDAR_COMBINED_PATH", "backend/data/calendar_combined.json")
+    if isinstance(combined_payload, dict):
+        maybe_earnings = combined_payload.get("earnings")
+        if isinstance(maybe_earnings, list) and maybe_earnings:
+            return _normalize_earnings_items(maybe_earnings)
+
+    try:
+        payload = get_marketbeat_earnings() if get_marketbeat_earnings else []
+    except Exception as e:
+        print(f"[calendar] earnings_fetch_failed error={type(e).__name__}: {e}")
+        payload = _earnings_last_success or []
+
+    payload = payload or []
+    if payload:
+        _earnings_last_success = payload
+
+    normalized: list[dict[str, Any]] = []
+    for item in payload:
+        report_date = (item.get("report_date") or "").strip()
+        normalized.append({**item, "kind": "earnings", "event_date": report_date, "event": "Earnings"})
+    return normalized
+
+
+def _load_economic_items_from_cron() -> list[dict[str, Any]]:
+    """
+    cron 산출물에서 경제지표를 읽는다.
+    지원 포맷:
+    - CRON_ECONOMIC_CALENDAR_PATH: list[dict]
+    - CRON_CALENDAR_COMBINED_PATH: {"nasdaq_econ":[], "forexfactory_econ":[], "filter":{...}}
+    """
+    direct_payload = _load_json_from_env_path("CRON_ECONOMIC_CALENDAR_PATH", "backend/data/economic_calendar.json")
+    if isinstance(direct_payload, list):
+        return _normalize_economic_items(direct_payload)
+
+    combined_payload = _load_json_from_env_path("CRON_CALENDAR_COMBINED_PATH", "backend/data/calendar_combined.json")
+    if not isinstance(combined_payload, dict):
+        return []
+
+    ff_raw = combined_payload.get("forexfactory_econ")
+    nasdaq_raw = combined_payload.get("nasdaq_econ")
+    ff_items = _normalize_economic_items(ff_raw if isinstance(ff_raw, list) else [])
+    nasdaq_items = _normalize_economic_items(nasdaq_raw if isinstance(nasdaq_raw, list) else [])
+
+    filter_cfg = combined_payload.get("filter") if isinstance(combined_payload.get("filter"), dict) else {}
+    selected, _source = _apply_cron_selection_policy(ff_items, nasdaq_items, filter_cfg)
+    return selected
+
+
+def _load_json_from_env_path(env_key: str, default_rel_path: str) -> Any:
+    configured_path = os.getenv(env_key, default_rel_path)
+    path = Path(configured_path)
+    if not path.is_absolute():
+        repo_root = Path(__file__).resolve().parents[1]
+        path = (repo_root / configured_path).resolve()
+
+    if not path.exists():
+        return None
+
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception as e:
+        print(f"[calendar] json_read_failed env={env_key} path={path} error={type(e).__name__}: {e}")
+        return None
+
+
+def _date_from_iso_start(value: str) -> str:
+    if not value:
+        return ""
+    try:
+        return datetime.fromisoformat(value).date().isoformat()
+    except ValueError:
+        return ""
+
+
+def _infer_importance(summary: str) -> str:
+    s = summary.lower()
+    if "major" in s:
+        return "major"
+    if "minor" in s:
+        return "minor"
+    return "medium"
+
+
+def _normalize_economic_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for row in items:
+        if not isinstance(row, dict):
+            continue
+        summary = str(row.get("summary") or row.get("event") or row.get("title") or "Economic Event")
+        start = str(row.get("start") or "")
+        out.append(
+            {
+                **row,
+                "kind": "economic",
+                "event": summary,
+                "event_date": str(row.get("event_date") or row.get("date") or _date_from_iso_start(start)).strip(),
+                "country": row.get("country") or "US",
+                "importance": row.get("importance") or _infer_importance(summary),
+                "start": start or row.get("start_time"),
+                "consensus": row.get("consensus"),
+                "previous": row.get("previous"),
+                "actual": row.get("actual"),
+            }
+        )
+    return out
+
+
+def _normalize_earnings_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for row in items:
+        if not isinstance(row, dict):
+            continue
+        start = str(row.get("start") or "")
+        symbol = row.get("symbol") or row.get("ticker")
+        out.append(
+            {
+                **row,
+                "kind": "earnings",
+                "ticker": symbol,
+                "report_date": row.get("report_date") or _date_from_iso_start(start),
+                "event_date": row.get("event_date") or row.get("report_date") or _date_from_iso_start(start),
+                "release_time": row.get("report_time") or row.get("release_time"),
+                "eps_estimate": row.get("eps_forecast") or row.get("eps_estimate"),
+                "event": "Earnings",
+            }
+        )
+    return out
+
+
+def _apply_cron_selection_policy(
+    forexfactory_items: list[dict[str, Any]],
+    nasdaq_items: list[dict[str, Any]],
+    filter_cfg: dict[str, Any],
+) -> tuple[list[dict[str, Any]], str]:
+    ff_cap = int(filter_cfg.get("forexfactory_econ", 10) or 10)
+    nasdaq_cap = int(filter_cfg.get("nasdaq_econ", 17) or 17)
+    preferred = str(filter_cfg.get("effective_econ_source") or "nasdaq_economic").strip().lower()
+
+    if preferred == "nasdaq_economic" and nasdaq_items:
+        return nasdaq_items[:nasdaq_cap], "nasdaq_economic"
+    if preferred == "forexfactory" and forexfactory_items:
+        return forexfactory_items[:ff_cap], "forexfactory"
+    if nasdaq_items:
+        return nasdaq_items[:nasdaq_cap], "nasdaq_economic"
+    return forexfactory_items[:ff_cap], "forexfactory"
+
+
+def _load_calendar_filter_config() -> dict[str, Any]:
+    defaults = {
+        "forexfactory_econ": 10,
+        "nasdaq_econ": 17,
+        "earnings": 6,
+        "effective_econ_source": "nasdaq_economic",
+        "desired_total": 23,
+    }
+
+    payload = _load_json_from_env_path("CRON_CALENDAR_FILTER_PATH", "backend/data/calendar_filter.json")
+    if isinstance(payload, dict):
+        merged = {**defaults, **payload}
+        return merged
+    return defaults
+
+
+def _parse_csv_values(value: Optional[str]) -> set[str]:
+    if not value:
+        return set()
+    return {v.strip().lower() for v in value.split(",") if v.strip()}
+
+
+def _filter_calendar_items(
+    items: list[dict[str, Any]],
+    *,
+    start_date: date,
+    end_date: date,
+    kind: Optional[str],
+    status: Optional[str],
+    country: Optional[str],
+    importance: Optional[str],
+    ticker: Optional[str],
+) -> list[dict[str, Any]]:
+    kinds = _parse_csv_values(kind)
+    statuses = _parse_csv_values(status)
+    countries = _parse_csv_values(country)
+    importances = _parse_csv_values(importance)
+    tickers = _parse_csv_values(ticker)
+
+    out: list[dict[str, Any]] = []
+    for item in items:
+        event_date = str(item.get("event_date") or "").strip()
+        if event_date:
+            try:
+                d = datetime.strptime(event_date, "%Y-%m-%d").date()
+                if d < start_date or d > end_date:
+                    continue
+            except ValueError:
+                continue
+
+        item_kind = str(item.get("kind") or "").strip().lower()
+        item_status = str(item.get("status") or "").strip().lower()
+        item_country = str(item.get("country") or "").strip().lower()
+        item_importance = str(item.get("importance") or "").strip().lower()
+        item_ticker = str(item.get("ticker") or "").strip().lower()
+
+        if kinds and item_kind not in kinds:
+            continue
+        if statuses and item_status not in statuses:
+            continue
+        if countries and item_country not in countries:
+            continue
+        if importances and item_importance not in importances:
+            continue
+        if tickers and item_ticker not in tickers:
+            continue
+
+        out.append(item)
+
+    return out
