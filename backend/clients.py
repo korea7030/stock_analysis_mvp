@@ -429,8 +429,8 @@ def _is_missing_text(value: Any) -> bool:
     if value is None:
         return True
     if isinstance(value, str):
-        cleaned = value.strip()
-        return cleaned in {"", "-", "—", "N/A"}
+        cleaned = value.strip().replace("&nbsp;", "").replace("&nbsp", "")
+        return cleaned in {"", "-", "—", "N/A", "null"}
     return False
 
 
