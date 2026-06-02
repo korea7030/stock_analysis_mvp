@@ -4,8 +4,16 @@ import time
 import os
 import concurrent.futures
 import urllib.parse
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Callable, Optional, TypeVar
+
+def get_logical_today() -> date:
+    kst = timezone(timedelta(hours=9))
+    now_kst = datetime.now(kst)
+    # If Sunday after 9:00 AM KST, advance to next Monday to load next week's calendar logically
+    if now_kst.weekday() == 6 and now_kst.hour >= 9:
+        return (now_kst + timedelta(days=1)).date()
+    return now_kst.date()
 
 import requests
 from bs4 import BeautifulSoup
@@ -501,12 +509,7 @@ def nasdaq_get_earnings_for_date(
 
 def nasdaq_get_weekly_earnings(anchor_date: date | None = None) -> list[dict[str, Any]]:
     if anchor_date is None:
-        try:
-            from zoneinfo import ZoneInfo
-
-            anchor_date = datetime.now(ZoneInfo("America/New_York")).date()
-        except Exception:
-            anchor_date = datetime.now().date()
+        anchor_date = get_logical_today()
 
     week_start = anchor_date - timedelta(days=anchor_date.weekday())
     days = [week_start + timedelta(days=i) for i in range(7)]
@@ -604,10 +607,15 @@ def nasdaq_get_economic_calendar_for_date(
             if not event_name:
                 continue
 
+            country = str(row.get("country") or "").strip()
+            # Filter for US indicators only
+            if country.lower() not in {"united states", "us"}:
+                continue
+
             out.append({
                 "event": str(event_name).strip(),
                 "event_date": date_str,
-                "country": str(row.get("country") or "US").strip(),
+                "country": country,
                 "importance": "medium",
                 "actual": str(row.get("actual") or "").strip() if not _is_missing_text(row.get("actual")) else None,
                 "consensus": str(row.get("consensus") or "").strip() if not _is_missing_text(row.get("consensus")) else None,
@@ -621,14 +629,11 @@ def nasdaq_get_economic_calendar_for_date(
 
 def nasdaq_get_weekly_economic_calendar(anchor_date: date | None = None) -> list[dict[str, Any]]:
     if anchor_date is None:
-        try:
-            from zoneinfo import ZoneInfo
-            anchor_date = datetime.now(ZoneInfo("America/New_York")).date()
-        except Exception:
-            anchor_date = datetime.now().date()
+        anchor_date = get_logical_today()
 
     week_start = anchor_date - timedelta(days=anchor_date.weekday())
-    days = [week_start + timedelta(days=i) for i in range(5)]
+    # Retrieve all 7 days of the week (Monday through Sunday)
+    days = [week_start + timedelta(days=i) for i in range(7)]
 
     econ_events: list[dict[str, Any]] = []
     for d in days:

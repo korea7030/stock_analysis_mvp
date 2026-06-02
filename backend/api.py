@@ -13,6 +13,7 @@ import uvicorn
 
 from backend.analyzer import run_analysis   # 수정된 analyzer (원본 표 HTML 포함)
  
+from backend.clients import get_logical_today
 from backend.cache import TTLCache
 from backend.models import (
     AnalyzeMeta,
@@ -222,7 +223,7 @@ def calendar(
     if cached_payload is not None:
         return cached_payload
 
-    today = date.today()
+    today = get_logical_today()
     start_date = today - timedelta(days=today.weekday())
     end_date = start_date + timedelta(days=7 * weeks - 1)
 

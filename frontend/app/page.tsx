@@ -661,8 +661,15 @@ export default function Dashboard() {
                         </div>
                         <div className="text-xs text-slate-600 mt-1">
                           {(it.country || "-") + " · " + (it.importance || "-")}
+                          {it.release_time && ` · ${it.release_time}`}
                         </div>
-                        <div className="text-xs text-slate-600 mt-1 line-clamp-2">{it.company || ""}</div>
+                        {(it.actual || it.consensus || it.previous) && (
+                          <div className="text-xs text-slate-500 mt-2 grid grid-cols-3 gap-1 bg-white/70 p-2 rounded border border-indigo-100/50">
+                            <div>실제: <span className="font-medium text-slate-800">{it.actual || "-"}</span></div>
+                            <div>예측: <span className="font-medium text-slate-800">{it.consensus || "-"}</span></div>
+                            <div>이전: <span className="font-medium text-slate-800">{it.previous || "-"}</span></div>
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>
