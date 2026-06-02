@@ -8,3 +8,5 @@ frontend/.env.local
 AGENTS.md
 .sisyphus/
 frontend/out/
+**/.DS_Store/*
+.DS_Store
