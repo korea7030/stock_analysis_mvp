@@ -15,6 +15,22 @@ def get_logical_today() -> date:
         return (now_kst + timedelta(days=1)).date()
     return now_kst.date()
 
+def convert_et_to_kst(date_str: str, time_str: str) -> tuple[str, str]:
+    from zoneinfo import ZoneInfo
+    date_str = (date_str or "").strip()
+    time_str = (time_str or "").strip()
+    if not date_str or not time_str:
+        return date_str, time_str
+    try:
+        et_tz = ZoneInfo("America/New_York")
+        kst_tz = ZoneInfo("Asia/Seoul")
+        dt_str = f"{date_str} {time_str}"
+        et_dt = datetime.strptime(dt_str, "%Y-%m-%d %H:%M").replace(tzinfo=et_tz)
+        kst_dt = et_dt.astimezone(kst_tz)
+        return kst_dt.date().isoformat(), kst_dt.strftime("%H:%M")
+    except Exception:
+        return date_str, time_str
+
 import requests
 from bs4 import BeautifulSoup
 from pyrate_limiter import Duration, Limiter, Rate
@@ -612,15 +628,18 @@ def nasdaq_get_economic_calendar_for_date(
             if country.lower() not in {"united states", "us"}:
                 continue
 
+            gmt_time = str(row.get("gmt") or "").strip()
+            kst_date_str, kst_time_str = convert_et_to_kst(date_str, gmt_time)
+
             out.append({
                 "event": str(event_name).strip(),
-                "event_date": date_str,
+                "event_date": kst_date_str,
                 "country": country,
                 "importance": "medium",
                 "actual": str(row.get("actual") or "").strip() if not _is_missing_text(row.get("actual")) else None,
                 "consensus": str(row.get("consensus") or "").strip() if not _is_missing_text(row.get("consensus")) else None,
                 "previous": str(row.get("previous") or "").strip() if not _is_missing_text(row.get("previous")) else None,
-                "release_time": str(row.get("gmt") or "").strip(),
+                "release_time": kst_time_str,
             })
         return out
 
