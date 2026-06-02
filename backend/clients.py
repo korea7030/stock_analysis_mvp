@@ -431,7 +431,7 @@ def nasdaq_get_earnings_for_date(
     *,
     today: date | None = None,
     now_et: datetime | None = None,
-    timeout_s: int = 3,
+    timeout_s: int = 5,
 ) -> list[dict[str, Any]]:
     date_str = report_date.isoformat()
     url = f"https://api.nasdaq.com/api/calendar/earnings?date={urllib.parse.quote_plus(date_str)}"
@@ -531,15 +531,111 @@ def nasdaq_get_weekly_earnings(anchor_date: date | None = None) -> list[dict[str
 
 
 def get_weekly_earnings() -> list[dict[str, Any]]:
+    nasdaq_list: list[dict[str, Any]] = []
     try:
-        earnings = nasdaq_get_weekly_earnings()
-        if earnings:
-            return earnings
+        nasdaq_list = nasdaq_get_weekly_earnings()
     except Exception as e:
         print(f"[earnings] nasdaq_failed error={type(e).__name__}: {e}")
 
+    marketbeat_list: list[dict[str, Any]] = []
     try:
-        return marketbeat_get_weekly_earnings()
+        marketbeat_list = marketbeat_get_weekly_earnings()
     except Exception as e:
         print(f"[earnings] marketbeat_failed error={type(e).__name__}: {e}")
+
+    if not nasdaq_list and not marketbeat_list:
         return []
+
+    merged: list[dict[str, Any]] = []
+    seen_tickers = set()
+
+    for item in nasdaq_list:
+        ticker = (item.get("ticker") or "").strip().upper()
+        if ticker:
+            seen_tickers.add(ticker)
+        merged.append(item)
+
+    for item in marketbeat_list:
+        ticker = (item.get("ticker") or "").strip().upper()
+        if ticker in seen_tickers:
+            for existing in merged:
+                if (existing.get("ticker") or "").strip().upper() == ticker:
+                    if item.get("status") == "reported" and existing.get("status") != "reported":
+                        existing["status"] = "reported"
+                    if item.get("eps_actual") and not existing.get("eps_actual"):
+                        existing["eps_actual"] = item.get("eps_actual")
+                    if item.get("revenue_actual") and not existing.get("revenue_actual"):
+                        existing["revenue_actual"] = item.get("revenue_actual")
+                    break
+        else:
+            if ticker:
+                seen_tickers.add(ticker)
+            merged.append(item)
+
+    return merged
+
+
+def nasdaq_get_economic_calendar_for_date(
+    report_date: date,
+    timeout_s: int = 5,
+) -> list[dict[str, Any]]:
+    date_str = report_date.isoformat()
+    url = f"https://api.nasdaq.com/api/calendar/economicevents?date={urllib.parse.quote_plus(date_str)}"
+
+    def _call() -> list[dict[str, Any]]:
+        t0 = time.time()
+        _limiter_acquire(NASDAQ_LIMITER, "nasdaq")
+        waited_s = time.time() - t0
+        rate_limited = waited_s >= 0.01
+        print(f"[nasdaq_econ_fetch] url={url} rate_limited={rate_limited} waited_s={waited_s:.3f}")
+        r = requests.get(url, headers=_nasdaq_headers(), timeout=timeout_s)
+        if r.status_code != 200:
+            raise HttpStatusError(r.status_code, f"HTTP {r.status_code}")
+        payload = r.json()
+        rows = ((payload.get("data") or {}).get("rows")) or []
+        if not isinstance(rows, list):
+            return []
+
+        out: list[dict[str, Any]] = []
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            event_name = row.get("eventName")
+            if not event_name:
+                continue
+
+            out.append({
+                "event": str(event_name).strip(),
+                "event_date": date_str,
+                "country": str(row.get("country") or "US").strip(),
+                "importance": "medium",
+                "actual": str(row.get("actual") or "").strip() if not _is_missing_text(row.get("actual")) else None,
+                "consensus": str(row.get("consensus") or "").strip() if not _is_missing_text(row.get("consensus")) else None,
+                "previous": str(row.get("previous") or "").strip() if not _is_missing_text(row.get("previous")) else None,
+                "release_time": str(row.get("gmt") or "").strip(),
+            })
+        return out
+
+    return _retry(_call, attempts=1, base_sleep_s=0.5, max_sleep_s=4.0, label="nasdaq_econ_fetch")
+
+
+def nasdaq_get_weekly_economic_calendar(anchor_date: date | None = None) -> list[dict[str, Any]]:
+    if anchor_date is None:
+        try:
+            from zoneinfo import ZoneInfo
+            anchor_date = datetime.now(ZoneInfo("America/New_York")).date()
+        except Exception:
+            anchor_date = datetime.now().date()
+
+    week_start = anchor_date - timedelta(days=anchor_date.weekday())
+    days = [week_start + timedelta(days=i) for i in range(5)]
+
+    econ_events: list[dict[str, Any]] = []
+    for d in days:
+        try:
+            econ_events.extend(nasdaq_get_economic_calendar_for_date(d))
+        except Exception as e:
+            print(f"[nasdaq_econ_fetch] date={d.isoformat()} failed error={type(e).__name__}: {e}")
+            continue
+
+    return econ_events
