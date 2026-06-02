@@ -78,4 +78,7 @@ export type CalendarItem = EarningsItem & {
   event?: string | null;
   country?: string | null;
   importance?: string | null;
+  actual?: string | null;
+  consensus?: string | null;
+  previous?: string | null;
 };
