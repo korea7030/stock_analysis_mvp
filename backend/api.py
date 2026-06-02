@@ -223,7 +223,8 @@ def calendar(
         return cached_payload
 
     today = date.today()
-    end_date = today + timedelta(days=7 * weeks - 1)
+    start_date = today - timedelta(days=today.weekday())
+    end_date = start_date + timedelta(days=7 * weeks - 1)
 
     filter_cfg = _load_calendar_filter_config()
 
@@ -236,7 +237,7 @@ def calendar(
 
     filtered = _filter_calendar_items(
         merged,
-        start_date=today,
+        start_date=start_date,
         end_date=end_date,
         kind=kind,
         status=status,
@@ -382,7 +383,8 @@ def _fetch_earnings_items() -> list[dict[str, Any]]:
         return []
 
     try:
-        payload = get_marketbeat_earnings() if get_marketbeat_earnings else []
+        from backend.clients import get_weekly_earnings
+        payload = get_weekly_earnings() if get_weekly_earnings else []
     except Exception as e:
         print(f"[calendar] earnings_fetch_failed error={type(e).__name__}: {e}")
         payload = _earnings_last_success or []
