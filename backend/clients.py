@@ -431,7 +431,7 @@ def nasdaq_get_earnings_for_date(
     *,
     today: date | None = None,
     now_et: datetime | None = None,
-    timeout_s: int = 20,
+    timeout_s: int = 3,
 ) -> list[dict[str, Any]]:
     date_str = report_date.isoformat()
     url = f"https://api.nasdaq.com/api/calendar/earnings?date={urllib.parse.quote_plus(date_str)}"
@@ -496,7 +496,7 @@ def nasdaq_get_earnings_for_date(
             )
         return out
 
-    return _retry(_call, attempts=3, base_sleep_s=0.5, max_sleep_s=4.0, label="nasdaq_fetch")
+    return _retry(_call, attempts=1, base_sleep_s=0.5, max_sleep_s=4.0, label="nasdaq_fetch")
 
 
 def nasdaq_get_weekly_earnings(anchor_date: date | None = None) -> list[dict[str, Any]]:

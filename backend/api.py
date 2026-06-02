@@ -166,7 +166,7 @@ async def health():
     response_model_exclude_none=True,
     responses={500: {"model": ApiError}},
 )
-async def earnings():
+def earnings():
     global _earnings_last_success
     cache_key = "earnings"
     cached_payload = _earnings_cache.get(cache_key)
@@ -209,7 +209,7 @@ async def earnings():
 
 
 @app.get("/calendar", response_model=list[dict[str, Any]])
-async def calendar(
+def calendar(
     weeks: int = Query(1, ge=1, le=4),
     kind: Optional[str] = Query(None, description="earnings,economic"),
     status: Optional[str] = Query(None),
