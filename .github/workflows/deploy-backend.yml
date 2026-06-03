@@ -43,7 +43,7 @@ jobs:
       - name: Build Docker image
         run: |
           docker build \
-            -f Dockerfile \
+            -f backend/Dockerfile \
             -t ${{ env.ARTIFACT_REGISTRY }}/${{ env.PROJECT_ID }}/${{ env.IMAGE_NAME }}:${{ github.sha }} \
             -t ${{ env.ARTIFACT_REGISTRY }}/${{ env.PROJECT_ID }}/${{ env.IMAGE_NAME }}:latest \
             .
