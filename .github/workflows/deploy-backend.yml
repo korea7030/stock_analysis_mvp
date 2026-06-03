@@ -6,7 +6,6 @@ on:
       - main
     paths:
       - 'backend/**'
-      - 'Dockerfile'
       - '.github/workflows/deploy-backend.yml'
 
 env:
@@ -40,26 +39,33 @@ jobs:
         run: |
           gcloud config set project ${{ env.PROJECT_ID }}
 
-      - name: Debug - Check authentication
+      - name: Configure Docker for Artifact Registry
         run: |
-          echo "=== Current authenticated account ==="
-          gcloud auth list
-          echo ""
-          echo "=== Service account info ==="
-          gcloud auth application-default print-access-token | grep -o '"email":"[^"]*"' || echo "No token info"
-          echo ""
-          echo "=== Current project ==="
-          gcloud config get-value project
+          gcloud auth configure-docker ${{ env.ARTIFACT_REGISTRY }}
 
-      - name: Deploy to Cloud Run (using source)
+      - name: Build Docker image
+        run: |
+          docker build \
+            -f backend/Dockerfile \
+            -t ${{ env.ARTIFACT_REGISTRY }}/${{ env.PROJECT_ID }}/${{ env.IMAGE_NAME }}:${{ github.sha }} \
+            -t ${{ env.ARTIFACT_REGISTRY }}/${{ env.PROJECT_ID }}/${{ env.IMAGE_NAME }}:latest \
+            .
+
+      - name: Push image to Artifact Registry
+        run: |
+          docker push ${{ env.ARTIFACT_REGISTRY }}/${{ env.PROJECT_ID }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+          docker push ${{ env.ARTIFACT_REGISTRY }}/${{ env.PROJECT_ID }}/${{ env.IMAGE_NAME }}:latest
+
+      - name: Deploy to Cloud Run
         run: |
           gcloud run deploy stock-backend-api \
-            --source=backend/ \
+            --image=${{ env.ARTIFACT_REGISTRY }}/${{ env.PROJECT_ID }}/${{ env.IMAGE_NAME }}:${{ github.sha }} \
             --region=${{ env.REGION }} \
             --platform=managed \
             --allow-unauthenticated \
             --port=8080 \
             --project=${{ env.PROJECT_ID }}
+
       - name: Output service URL
         run: |
           echo "Deployment completed!"
