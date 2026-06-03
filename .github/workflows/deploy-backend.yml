@@ -61,8 +61,8 @@ jobs:
             --platform=managed \
             --allow-unauthenticated \
             --port=8000 \
-            --project=${{ env.PROJECT_ID }}
-
+            --project=${{ env.PROJECT_ID }} \
+            --quiet
       - name: Output service URL
         run: |
           echo "Deployment completed!"
