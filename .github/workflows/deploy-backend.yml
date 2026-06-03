@@ -41,8 +41,22 @@ jobs:
 
       - name: Configure Docker for Artifact Registry
         run: |
+          echo "=== Step 1: gcloud auth configure-docker ===" 
           gcloud auth configure-docker ${{ env.ARTIFACT_REGISTRY }} --quiet
-          gcloud auth print-access-token | docker login -u oauth2accesstoken --password-stdin https://${{ env.ARTIFACT_REGISTRY }}
+          echo "✅ Step 1 completed"
+          
+          echo "=== Step 2: gcloud auth print-access-token ==="
+          TOKEN=$(gcloud auth print-access-token)
+          echo "Token length: ${#TOKEN}"
+          echo "✅ Step 2 completed"
+          
+          echo "=== Step 3: docker login ==="
+          echo $TOKEN | docker login -u oauth2accesstoken --password-stdin https://${{ env.ARTIFACT_REGISTRY }}
+          echo "✅ Step 3 completed"
+          
+          echo "=== Step 4: verify docker config ==="
+          cat ~/.docker/config.json | head -20
+          echo "✅ Step 4 completed"
 
       - name: Build Docker image
         run: |
