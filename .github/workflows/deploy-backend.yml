@@ -36,6 +36,10 @@ jobs:
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2
 
+      - name: Set GCP Project
+        run: |
+          gcloud config set project ${{ env.PROJECT_ID }}
+
       - name: Debug - Check authentication
         run: |
           echo "=== Current authenticated account ==="
