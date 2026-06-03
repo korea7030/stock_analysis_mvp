@@ -55,8 +55,7 @@ jobs:
             --platform=managed \
             --allow-unauthenticated \
             --port=8080 \
-            --project=${{ env.PROJECT_ID }} \
-            --runtime=python311
+            --project=${{ env.PROJECT_ID }}
       - name: Output service URL
         run: |
           echo "Deployment completed!"
