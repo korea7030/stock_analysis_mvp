@@ -13,6 +13,7 @@ import uvicorn
 
 from backend.analyzer import run_analysis   # 수정된 analyzer (원본 표 HTML 포함)
  
+from backend.clients import get_logical_today
 from backend.cache import TTLCache
 from backend.models import (
     AnalyzeMeta,
@@ -166,7 +167,7 @@ async def health():
     response_model_exclude_none=True,
     responses={500: {"model": ApiError}},
 )
-async def earnings():
+def earnings():
     global _earnings_last_success
     cache_key = "earnings"
     cached_payload = _earnings_cache.get(cache_key)
@@ -209,7 +210,7 @@ async def earnings():
 
 
 @app.get("/calendar", response_model=list[dict[str, Any]])
-async def calendar(
+def calendar(
     weeks: int = Query(1, ge=1, le=4),
     kind: Optional[str] = Query(None, description="earnings,economic"),
     status: Optional[str] = Query(None),
@@ -222,8 +223,9 @@ async def calendar(
     if cached_payload is not None:
         return cached_payload
 
-    today = date.today()
-    end_date = today + timedelta(days=7 * weeks - 1)
+    today = get_logical_today()
+    start_date = today - timedelta(days=today.weekday())
+    end_date = start_date + timedelta(days=7 * weeks - 1)
 
     filter_cfg = _load_calendar_filter_config()
 
@@ -236,7 +238,7 @@ async def calendar(
 
     filtered = _filter_calendar_items(
         merged,
-        start_date=today,
+        start_date=start_date,
         end_date=end_date,
         kind=kind,
         status=status,
@@ -255,7 +257,8 @@ async def calendar(
 
 
 if __name__ == "__main__":
-    uvicorn.run("api:app", host="0.0.0.0", port=8000, reload=True)
+    port = int(os.getenv("PORT", 8000))
+    uvicorn.run("api:app", host="0.0.0.0", port=port, reload=True)
 
 
 def _error_response(status_code: int, code: str, message: str, details: Optional[Any] = None) -> JSONResponse:
@@ -381,7 +384,8 @@ def _fetch_earnings_items() -> list[dict[str, Any]]:
         return []
 
     try:
-        payload = get_marketbeat_earnings() if get_marketbeat_earnings else []
+        from backend.clients import get_weekly_earnings
+        payload = get_weekly_earnings() if get_weekly_earnings else []
     except Exception as e:
         print(f"[calendar] earnings_fetch_failed error={type(e).__name__}: {e}")
         payload = _earnings_last_success or []
@@ -394,28 +398,30 @@ def _fetch_earnings_items() -> list[dict[str, Any]]:
 
 
 def _load_economic_items_from_cron() -> list[dict[str, Any]]:
-    """
-    cron 산출물에서 경제지표를 읽는다.
-    지원 포맷:
-    - CRON_ECONOMIC_CALENDAR_PATH: list[dict]
-    - CRON_CALENDAR_COMBINED_PATH: {"nasdaq_econ":[], "forexfactory_econ":[], "filter":{...}}
-    """
     direct_payload = _load_json_from_env_path("CRON_ECONOMIC_CALENDAR_PATH", "backend/data/economic_calendar.json")
-    if isinstance(direct_payload, list):
+    if isinstance(direct_payload, list) and direct_payload:
         return _normalize_economic_items(direct_payload)
 
     combined_payload = _load_json_from_env_path("CRON_CALENDAR_COMBINED_PATH", "backend/data/calendar_combined.json")
-    if not isinstance(combined_payload, dict):
+    if isinstance(combined_payload, dict):
+        ff_raw = combined_payload.get("forexfactory_econ")
+        nasdaq_raw = combined_payload.get("nasdaq_econ")
+        ff_items = _normalize_economic_items(ff_raw if isinstance(ff_raw, list) else [])
+        nasdaq_items = _normalize_economic_items(nasdaq_raw if isinstance(nasdaq_raw, list) else [])
+
+        filter_cfg = combined_payload.get("filter") if isinstance(combined_payload.get("filter"), dict) else {}
+        selected, _source = _apply_cron_selection_policy(ff_items, nasdaq_items, filter_cfg)
+        if selected:
+            return selected
+
+    print("[calendar] economic cron files not found, starting live economic fallback")
+    try:
+        from backend.clients import nasdaq_get_weekly_economic_calendar
+        live_econ = nasdaq_get_weekly_economic_calendar()
+        return _normalize_economic_items(live_econ)
+    except Exception as e:
+        print(f"[calendar] live economic fallback failed: {e}")
         return []
-
-    ff_raw = combined_payload.get("forexfactory_econ")
-    nasdaq_raw = combined_payload.get("nasdaq_econ")
-    ff_items = _normalize_economic_items(ff_raw if isinstance(ff_raw, list) else [])
-    nasdaq_items = _normalize_economic_items(nasdaq_raw if isinstance(nasdaq_raw, list) else [])
-
-    filter_cfg = combined_payload.get("filter") if isinstance(combined_payload.get("filter"), dict) else {}
-    selected, _source = _apply_cron_selection_policy(ff_items, nasdaq_items, filter_cfg)
-    return selected
 
 
 def _load_json_from_env_path(env_key: str, default_rel_path: str) -> Any:
