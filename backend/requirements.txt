@@ -37,3 +37,4 @@ xxhash
 fastapi
 uvicorn
 pytest
+openai

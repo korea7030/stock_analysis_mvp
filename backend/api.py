@@ -14,7 +14,6 @@ from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 
 from backend.analyzer import run_analysis
- 
 from backend.clients import get_logical_today
 from backend.cache import TTLCache
 from backend.models import (
@@ -23,9 +22,13 @@ from backend.models import (
     AnalyzeResponse,
     AnalyzeSections,
     AnalyzeTables,
+    AiSummaryResponse,
     ApiError,
     EarningsItem,
+    MetricHistoryEntry,
+    MetricHistoryResponse,
 )
+from backend.postgres_store import save_metric_history, load_metric_history
 
 try:
     from backend.analyzer import get_marketbeat_earnings
@@ -125,6 +128,7 @@ async def analyze(
             )
 
         _analyze_cache.set(cache_key, response_payload, ANALYZE_CACHE_TTL_S)
+        _save_metrics_to_history(normalized_ticker, normalized_form, schema)
         return response_payload
 
     except ValueError as e:
@@ -149,6 +153,97 @@ async def analyze(
             message="Analysis failed",
             details=str(e),
         )
+
+
+@app.get(
+    "/analyze/history",
+    response_model=MetricHistoryResponse,
+    response_model_exclude_none=True,
+    responses={422: {"model": ApiError}},
+)
+async def analyze_history(
+    ticker: str = Query(...),
+    form: str = Query("10-Q"),
+    limit: int = Query(8, ge=1, le=20),
+):
+    try:
+        normalized_ticker = _normalize_ticker(ticker)
+        normalized_form = _normalize_form(form)
+    except ValueError as validation_error:
+        return _error_response(status_code=422, code="validation_error", message=str(validation_error))
+
+    rows = load_metric_history(ticker=normalized_ticker, form=normalized_form, limit=limit)
+    rows_asc = list(reversed(rows))
+
+    entries = []
+    for row in rows_asc:
+        raw_metrics = row.get("metrics") or {}
+        metrics = AnalyzeMetrics(**raw_metrics) if raw_metrics else None
+        entries.append(
+            MetricHistoryEntry(
+                period_end=row["period_end"],
+                filing_date=row.get("filing_date"),
+                accession_number=row.get("accession_number"),
+                source_url=row.get("source_url"),
+                metrics=metrics,
+            )
+        )
+
+    return MetricHistoryResponse(ticker=normalized_ticker, form=normalized_form, history=entries)
+
+
+_summary_cache: TTLCache[str] = TTLCache()
+SUMMARY_CACHE_TTL_S = int(os.getenv("SUMMARY_CACHE_TTL_S", "86400"))
+
+
+@app.get(
+    "/analyze/summary",
+    response_model=AiSummaryResponse,
+    responses={422: {"model": ApiError}, 500: {"model": ApiError}},
+)
+async def analyze_summary(
+    ticker: str = Query(...),
+    form: str = Query("10-Q"),
+):
+    try:
+        normalized_ticker = _normalize_ticker(ticker)
+        normalized_form = _normalize_form(form)
+    except ValueError as validation_error:
+        return _error_response(status_code=422, code="validation_error", message=str(validation_error))
+
+    cache_key = f"summary:{normalized_ticker}:{normalized_form}"
+    cached = _summary_cache.get(cache_key)
+    if cached is not None:
+        return AiSummaryResponse(ticker=normalized_ticker, form=normalized_form, summary=cached)
+
+    analyze_cached = _analyze_cache.get(f"analyze:{normalized_ticker}:{normalized_form}")
+    if analyze_cached is None:
+        return _error_response(
+            status_code=422,
+            code="no_analysis",
+            message="먼저 /analyze를 실행해 주세요.",
+        )
+
+    try:
+        from backend.ai_summary import generate_summary
+        meta = analyze_cached.get("meta") or {}
+        metrics = analyze_cached.get("metrics") or {}
+        summary = generate_summary(
+            ticker=normalized_ticker,
+            form=normalized_form,
+            meta=meta,
+            metrics=metrics,
+        )
+        _summary_cache.set(cache_key, summary, SUMMARY_CACHE_TTL_S)
+        period_end = meta.get("period_end")
+        return AiSummaryResponse(
+            ticker=normalized_ticker,
+            form=normalized_form,
+            period_end=period_end,
+            summary=summary,
+        )
+    except Exception as e:
+        return _error_response(status_code=500, code="ai_error", message=str(e))
 
 
 @app.get("/analyze/stream")
@@ -233,6 +328,7 @@ async def analyze_stream(
                     break
 
                 _analyze_cache.set(cache_key, response_payload, ANALYZE_CACHE_TTL_S)
+                _save_metrics_to_history(normalized_ticker, normalized_form, schema)
                 yield f"data: {json.dumps({'type': 'result', 'data': response_payload})}\n\n"
                 break
 
@@ -449,6 +545,26 @@ def _last_updated_if_today(value: Optional[str]) -> Optional[str]:
     if parsed.date() != datetime.now().date():
         return None
     return value
+
+
+def _save_metrics_to_history(ticker: str, form: str, schema: dict[str, Any]) -> None:
+    meta = schema.get("meta") or {}
+    period_end = meta.get("period_end")
+    if not period_end:
+        return
+    metrics = schema.get("metrics") or {}
+    try:
+        save_metric_history(
+            ticker=ticker,
+            form=form,
+            period_end=period_end,
+            filing_date=meta.get("filing_date"),
+            accession_number=meta.get("accession_number"),
+            source_url=meta.get("source_url"),
+            metrics=metrics,
+        )
+    except Exception as e:
+        print("[history] save failed:", e)
 
 
 def _fetch_earnings_items() -> list[dict[str, Any]]:

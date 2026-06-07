@@ -72,6 +72,27 @@ export type EarningsItem = {
   last_year_report_date?: string | null;
 };
 
+export type AiSummaryResponse = {
+  ticker: string;
+  form: string;
+  period_end?: string | null;
+  summary: string;
+};
+
+export type MetricHistoryEntry = {
+  period_end: string;
+  filing_date?: string | null;
+  accession_number?: string | null;
+  source_url?: string | null;
+  metrics?: AnalyzeMetrics | null;
+};
+
+export type MetricHistoryResponse = {
+  ticker: string;
+  form: string;
+  history: MetricHistoryEntry[];
+};
+
 export type CalendarItem = EarningsItem & {
   kind?: "earnings" | "economic" | string | null;
   event_date?: string | null;

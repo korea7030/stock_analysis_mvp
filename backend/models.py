@@ -80,6 +80,27 @@ class EarningsItem(BaseModel):
         extra = "allow"
 
 
+class AiSummaryResponse(BaseModel):
+    ticker: str
+    form: str
+    period_end: Optional[str] = None
+    summary: str
+
+
+class MetricHistoryEntry(BaseModel):
+    period_end: str
+    filing_date: Optional[str] = None
+    accession_number: Optional[str] = None
+    source_url: Optional[str] = None
+    metrics: Optional[AnalyzeMetrics] = None
+
+
+class MetricHistoryResponse(BaseModel):
+    ticker: str
+    form: str
+    history: list[MetricHistoryEntry]
+
+
 class ApiError(BaseModel):
     code: str
     message: str

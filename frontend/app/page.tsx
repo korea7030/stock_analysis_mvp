@@ -11,9 +11,11 @@ import {
   Tooltip,
   Legend,
   ResponsiveContainer,
+  LineChart,
+  Line,
 } from "recharts";
 
-import type { AnalyzeResponse, CalendarItem, FilingForm, MetricValue } from "@/lib/apiTypes";
+import type { AiSummaryResponse, AnalyzeResponse, CalendarItem, FilingForm, MetricValue, MetricHistoryResponse } from "@/lib/apiTypes";
 import { annotateTableHTML } from "@/lib/filingTables";
 
 const EARNINGS_PAGE_SIZE = 8;
@@ -140,6 +142,18 @@ export default function Dashboard() {
   const [loadingStep, setLoadingStep] = useState(0);
   const [elapsedSec, setElapsedSec] = useState(0);
   const [currentStepMsg, setCurrentStepMsg] = useState<string>("");
+
+  const [historyData, setHistoryData] = useState<MetricHistoryResponse | null>(null);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [activeTab, setActiveTab] = useState<"metrics" | "trend">("metrics");
+  const [compareTickerInput, setCompareTickerInput] = useState("");
+  const [compareData, setCompareData] = useState<AnalyzeResponse | null>(null);
+  const [compareLoading, setCompareLoading] = useState(false);
+  const [compareError, setCompareError] = useState<string | null>(null);
+
+  const [aiSummary, setAiSummary] = useState<AiSummaryResponse | null>(null);
+  const [aiSummaryLoading, setAiSummaryLoading] = useState(false);
+  const [aiSummaryError, setAiSummaryError] = useState<string | null>(null);
 
   const defaultApiBase =
     process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
@@ -425,11 +439,81 @@ export default function Dashboard() {
     return Number(value).toLocaleString();
   };
 
+  useEffect(() => {
+    if (!data) return;
+    const resolvedTicker = data.meta.ticker || ticker;
+    const resolvedForm = data.meta.report_type || form;
+    const baseUrl = normalizeBaseUrl(apiBaseUrl);
+    setHistoryLoading(true);
+    setHistoryData(null);
+    fetch(`${baseUrl}/analyze/history?ticker=${encodeURIComponent(resolvedTicker)}&form=${encodeURIComponent(resolvedForm)}`)
+      .then((r) => r.json())
+      .then((json) => setHistoryData(json as MetricHistoryResponse))
+      .catch(() => setHistoryData(null))
+      .finally(() => setHistoryLoading(false));
+    setAiSummary(null);
+    setAiSummaryError(null);
+  }, [data]);
+
   const formatPct = (value: number | null | undefined) => {
     if (value == null) return "N/A";
     const sign = value > 0 ? "+" : "";
     return `${sign}${value.toFixed(1)}%`;
   };
+
+  async function fetchAiSummary() {
+    if (!data) return;
+    const resolvedTicker = data.meta.ticker || ticker;
+    const resolvedForm = data.meta.report_type || form;
+    const baseUrl = normalizeBaseUrl(apiBaseUrl);
+    setAiSummaryLoading(true);
+    setAiSummaryError(null);
+    setAiSummary(null);
+    try {
+      const res = await fetch(`${baseUrl}/analyze/summary?ticker=${encodeURIComponent(resolvedTicker)}&form=${encodeURIComponent(resolvedForm)}`);
+      if (!res.ok) {
+        const err = (await res.json()) as { message?: string };
+        throw new Error(err.message ?? `HTTP ${res.status}`);
+      }
+      setAiSummary((await res.json()) as AiSummaryResponse);
+    } catch (e) {
+      setAiSummaryError(e instanceof Error ? e.message : "AI 요약 실패");
+    } finally {
+      setAiSummaryLoading(false);
+    }
+  }
+
+  async function fetchCompare() {
+    const ct = compareTickerInput.trim().toUpperCase();
+    if (!ct) return;
+    const baseUrl = normalizeBaseUrl(apiBaseUrl);
+    setCompareLoading(true);
+    setCompareError(null);
+    setCompareData(null);
+    try {
+      const res = await fetch(`${baseUrl}/analyze?ticker=${encodeURIComponent(ct)}&form=${encodeURIComponent(form)}`);
+      if (!res.ok) {
+        const err = (await res.json()) as { message?: string };
+        throw new Error(err.message ?? `HTTP ${res.status}`);
+      }
+      setCompareData((await res.json()) as AnalyzeResponse);
+    } catch (e) {
+      setCompareError(e instanceof Error ? e.message : "비교 데이터 로드 실패");
+    } finally {
+      setCompareLoading(false);
+    }
+  }
+
+  const COMPARE_METRICS: { key: keyof NonNullable<AnalyzeResponse["metrics"]>; label: string }[] = [
+    { key: "revenue", label: "매출" },
+    { key: "gross_profit", label: "매출총이익" },
+    { key: "operating_income", label: "영업이익" },
+    { key: "net_income", label: "순이익" },
+    { key: "operating_cash_flow", label: "영업현금흐름" },
+    { key: "free_cash_flow", label: "잉여현금흐름" },
+    { key: "total_assets", label: "총자산" },
+    { key: "total_equity", label: "총자본" },
+  ];
 
   const renderMetricRow = (label: string, metric?: MetricValue | null) => {
     const current = metric?.current ?? null;
@@ -711,6 +795,48 @@ export default function Dashboard() {
                 </div>
 
 
+                <div className="bg-gradient-to-r from-violet-50 to-indigo-50 border border-violet-100 rounded-xl p-5">
+                  <div className="flex items-center justify-between gap-3 mb-3">
+                    <div className="flex items-center gap-2">
+                      <span className="text-base font-semibold text-violet-900">AI 재무 요약</span>
+                      <span className="text-xs bg-violet-100 text-violet-700 px-2 py-0.5 rounded-full font-medium">GPT-4o</span>
+                    </div>
+                    {!aiSummary && !aiSummaryLoading && (
+                      <button
+                        type="button"
+                        onClick={() => void fetchAiSummary()}
+                        className="text-xs bg-violet-700 text-white px-3 py-1.5 rounded-lg hover:bg-violet-800"
+                      >
+                        요약 생성
+                      </button>
+                    )}
+                    {aiSummary && (
+                      <button
+                        type="button"
+                        onClick={() => void fetchAiSummary()}
+                        className="text-xs text-violet-600 hover:underline"
+                      >
+                        재생성
+                      </button>
+                    )}
+                  </div>
+                  {aiSummaryLoading && (
+                    <div className="flex items-center gap-2 text-sm text-violet-600">
+                      <span className="inline-block w-2 h-2 rounded-full bg-violet-400 animate-pulse" />
+                      GPT-4o 분석 중...
+                    </div>
+                  )}
+                  {aiSummaryError && (
+                    <p className="text-sm text-red-600">{aiSummaryError}</p>
+                  )}
+                  {aiSummary && (
+                    <p className="text-sm text-slate-800 leading-relaxed">{aiSummary.summary}</p>
+                  )}
+                  {!aiSummary && !aiSummaryLoading && !aiSummaryError && (
+                    <p className="text-xs text-violet-400">버튼을 눌러 AI 인사이트를 생성하세요</p>
+                  )}
+                </div>
+
                 {hasChartData && chartData && (
                   <div className="bg-white rounded-xl shadow p-5">
                     <div className="flex items-baseline justify-between gap-2 flex-wrap mb-4">
@@ -761,44 +887,171 @@ export default function Dashboard() {
 
                 {data.metrics && (
                   <div className="bg-white rounded-xl shadow p-5">
-                    <div className="flex items-baseline justify-between gap-2 flex-wrap mb-1">
+                    <div className="flex items-baseline justify-between gap-2 flex-wrap mb-3">
                       <h2 className="text-xl font-semibold">주요 지표</h2>
-                      <div className="text-xs text-slate-500">
-                        {data.meta.report_type && <span>{data.meta.report_type}</span>}
-                        {data.meta.period_end && <span> · 기준일 {data.meta.period_end}</span>}
-                        {data.meta.unit && <span> · 단위 {data.meta.unit}</span>}
+                      <div className="flex items-center gap-3">
+                        <div className="text-xs text-slate-500">
+                          {data.meta.report_type && <span>{data.meta.report_type}</span>}
+                          {data.meta.period_end && <span> · 기준일 {data.meta.period_end}</span>}
+                          {data.meta.unit && <span> · 단위 {data.meta.unit}</span>}
+                        </div>
+                        <div className="flex rounded-lg border border-slate-200 overflow-hidden text-xs">
+                          <button
+                            type="button"
+                            onClick={() => setActiveTab("metrics")}
+                            className={`px-3 py-1 ${activeTab === "metrics" ? "bg-slate-900 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}
+                          >
+                            지표
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setActiveTab("trend")}
+                            className={`px-3 py-1 ${activeTab === "trend" ? "bg-slate-900 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}
+                          >
+                            트렌드
+                          </button>
+                        </div>
                       </div>
                     </div>
-                    <p className="text-xs text-slate-400 mb-3">
-                      Current = 최근 보고 기간 / Previous = 직전 동기간
-                    </p>
-                    <div className="overflow-x-auto">
-                      <table className="w-full border-collapse">
-                        <thead>
-                          <tr className="border-b-2 border-slate-200">
-                            <th className="text-left py-2 px-3 text-xs font-semibold text-slate-600 uppercase tracking-wide">지표</th>
-                            <th className="text-right py-2 px-3 text-xs font-semibold text-slate-600 uppercase tracking-wide">Current</th>
-                            <th className="text-right py-2 px-3 text-xs font-semibold text-slate-600 uppercase tracking-wide">Previous</th>
-                            <th className="text-right py-2 px-3 text-xs font-semibold text-slate-600 uppercase tracking-wide">변동률</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-50">
-                          {renderMetricRow("Revenue", data.metrics.revenue)}
-                          {renderMetricRow("Gross Profit", data.metrics.gross_profit)}
-                          {renderMetricRow("Operating Income", data.metrics.operating_income)}
-                          {renderMetricRow("Net Income", data.metrics.net_income)}
-                          {renderMetricRow("EPS (Basic)", data.metrics.eps_basic)}
-                          {renderMetricRow("Cash & Equivalents", data.metrics.cash_and_equivalents)}
-                          {renderMetricRow("Total Assets", data.metrics.total_assets)}
-                          {renderMetricRow("Total Liabilities", data.metrics.total_liabilities)}
-                          {renderMetricRow("Total Equity", data.metrics.total_equity)}
-                          {renderMetricRow("Long-term Debt", data.metrics.long_term_debt)}
-                          {renderMetricRow("Operating Cash Flow", data.metrics.operating_cash_flow)}
-                          {renderMetricRow("Capex", data.metrics.capex)}
-                          {renderMetricRow("Free Cash Flow", data.metrics.free_cash_flow)}
-                        </tbody>
-                      </table>
+
+                    {activeTab === "metrics" && (
+                      <>
+                        <p className="text-xs text-slate-400 mb-3">
+                          Current = 최근 보고 기간 / Previous = 직전 동기간
+                        </p>
+                        <div className="overflow-x-auto">
+                          <table className="w-full border-collapse">
+                            <thead>
+                              <tr className="border-b-2 border-slate-200">
+                                <th className="text-left py-2 px-3 text-xs font-semibold text-slate-600 uppercase tracking-wide">지표</th>
+                                <th className="text-right py-2 px-3 text-xs font-semibold text-slate-600 uppercase tracking-wide">Current</th>
+                                <th className="text-right py-2 px-3 text-xs font-semibold text-slate-600 uppercase tracking-wide">Previous</th>
+                                <th className="text-right py-2 px-3 text-xs font-semibold text-slate-600 uppercase tracking-wide">변동률</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-50">
+                              {renderMetricRow("Revenue", data.metrics.revenue)}
+                              {renderMetricRow("Gross Profit", data.metrics.gross_profit)}
+                              {renderMetricRow("Operating Income", data.metrics.operating_income)}
+                              {renderMetricRow("Net Income", data.metrics.net_income)}
+                              {renderMetricRow("EPS (Basic)", data.metrics.eps_basic)}
+                              {renderMetricRow("Cash & Equivalents", data.metrics.cash_and_equivalents)}
+                              {renderMetricRow("Total Assets", data.metrics.total_assets)}
+                              {renderMetricRow("Total Liabilities", data.metrics.total_liabilities)}
+                              {renderMetricRow("Total Equity", data.metrics.total_equity)}
+                              {renderMetricRow("Long-term Debt", data.metrics.long_term_debt)}
+                              {renderMetricRow("Operating Cash Flow", data.metrics.operating_cash_flow)}
+                              {renderMetricRow("Capex", data.metrics.capex)}
+                              {renderMetricRow("Free Cash Flow", data.metrics.free_cash_flow)}
+                            </tbody>
+                          </table>
+                        </div>
+                      </>
+                    )}
+
+                    {activeTab === "trend" && (
+                      <div>
+                        {historyLoading && (
+                          <p className="text-sm text-slate-500 py-8 text-center">히스토리 로딩 중...</p>
+                        )}
+                        {!historyLoading && (!historyData || historyData.history.length <= 1) && (
+                          <p className="text-sm text-slate-400 py-8 text-center">
+                            히스토리 데이터 부족 — 분석을 여러 번 실행하면 쌓입니다
+                          </p>
+                        )}
+                        {!historyLoading && historyData && historyData.history.length > 1 && (() => {
+                          const trendChartData = historyData.history.map((entry) => ({
+                            period: entry.period_end,
+                            revenue: entry.metrics?.revenue?.current ?? null,
+                            net_income: entry.metrics?.net_income?.current ?? null,
+                            operating_cash_flow: entry.metrics?.operating_cash_flow?.current ?? null,
+                          }));
+                          return (
+                            <ResponsiveContainer width="100%" height={260}>
+                              <LineChart data={trendChartData} margin={{ top: 4, right: 8, left: 8, bottom: 4 }}>
+                                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                                <XAxis dataKey="period" tick={{ fontSize: 11, fill: "#64748b" }} axisLine={false} tickLine={false} />
+                                <YAxis tickFormatter={formatChartValue} tick={{ fontSize: 11, fill: "#94a3b8" }} axisLine={false} tickLine={false} width={52} />
+                                <Tooltip
+                                  formatter={(value: number) => formatChartValue(value)}
+                                  contentStyle={{ fontSize: 12, borderRadius: 8, border: "1px solid #e2e8f0" }}
+                                />
+                                <Legend wrapperStyle={{ fontSize: 12 }} />
+                                <Line type="monotone" dataKey="revenue" name="매출" stroke="#3b82f6" strokeWidth={2} dot={{ r: 4 }} connectNulls />
+                                <Line type="monotone" dataKey="net_income" name="순이익" stroke="#10b981" strokeWidth={2} dot={{ r: 4 }} connectNulls />
+                                <Line type="monotone" dataKey="operating_cash_flow" name="영업현금흐름" stroke="#f59e0b" strokeWidth={2} dot={{ r: 4 }} connectNulls />
+                              </LineChart>
+                            </ResponsiveContainer>
+                          );
+                        })()}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {data.metrics && (
+                  <div className="bg-white rounded-xl shadow p-5">
+                    <h2 className="text-xl font-semibold mb-3">티커 비교</h2>
+                    <div className="flex gap-2 mb-4">
+                      <input
+                        value={compareTickerInput}
+                        onChange={(e) => setCompareTickerInput(e.target.value.toUpperCase())}
+                        onKeyDown={(e) => { if (e.key === "Enter") void fetchCompare(); }}
+                        placeholder="비교할 티커 입력 (예: MSFT)"
+                        className="border rounded px-3 py-2 text-sm flex-1"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => void fetchCompare()}
+                        disabled={compareLoading || !compareTickerInput.trim()}
+                        className="bg-slate-800 text-white px-4 py-2 rounded text-sm hover:bg-slate-700 disabled:opacity-50"
+                      >
+                        {compareLoading ? "로딩..." : "비교"}
+                      </button>
+                      {compareData && (
+                        <button
+                          type="button"
+                          onClick={() => { setCompareData(null); setCompareTickerInput(""); setCompareError(null); }}
+                          className="px-3 py-2 border rounded text-sm text-slate-500 hover:bg-slate-50"
+                        >
+                          ✕
+                        </button>
+                      )}
                     </div>
+                    {compareError && <p className="text-sm text-red-600 mb-3">{compareError}</p>}
+                    {compareData?.metrics && (
+                      <div className="overflow-x-auto">
+                        <table className="w-full border-collapse text-sm">
+                          <thead>
+                            <tr className="border-b-2 border-slate-200">
+                              <th className="text-left py-2 px-3 text-xs font-semibold text-slate-600 uppercase tracking-wide">지표</th>
+                              <th className="text-right py-2 px-3 text-xs font-semibold text-slate-600 uppercase tracking-wide">{data.meta.ticker ?? ticker}</th>
+                              <th className="text-right py-2 px-3 text-xs font-semibold text-slate-600 uppercase tracking-wide">{compareData.meta.ticker ?? compareTickerInput}</th>
+                              <th className="text-right py-2 px-3 text-xs font-semibold text-slate-600 uppercase tracking-wide">차이</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-50">
+                            {COMPARE_METRICS.map(({ key, label }) => {
+                              const aVal = data.metrics?.[key]?.current ?? null;
+                              const bVal = compareData.metrics?.[key]?.current ?? null;
+                              const diff = aVal != null && bVal != null && bVal !== 0
+                                ? ((aVal - bVal) / Math.abs(bVal)) * 100
+                                : null;
+                              return (
+                                <tr key={key} className="hover:bg-slate-50">
+                                  <td className="py-2 px-3 font-medium text-slate-700">{label}</td>
+                                  <td className="py-2 px-3 text-right font-mono">{formatNumber(aVal)}</td>
+                                  <td className="py-2 px-3 text-right font-mono text-slate-500">{formatNumber(bVal)}</td>
+                                  <td className={`py-2 px-3 text-right font-medium ${diff == null ? "text-slate-400" : diff > 0 ? "text-green-600" : diff < 0 ? "text-red-500" : "text-slate-500"}`}>
+                                    {diff == null ? "-" : `${diff > 0 ? "+" : ""}${diff.toFixed(1)}%`}
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
                   </div>
                 )}
 
