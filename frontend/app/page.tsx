@@ -2,6 +2,16 @@
 
 import { useEffect, useState } from "react";
 import DOMPurify from "dompurify";
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  Legend,
+  ResponsiveContainer,
+} from "recharts";
 
 import type { AnalyzeResponse, CalendarItem, FilingForm, MetricValue } from "@/lib/apiTypes";
 import { annotateTableHTML } from "@/lib/filingTables";
@@ -11,6 +21,13 @@ const FILING_FORMS: readonly FilingForm[] = ["10-Q", "10-K", "6-K", "8-K", "20-F
 const FAVORITES_KEY = "stock-analysis-mvp:favorites";
 const RECENT_KEY = "stock-analysis-mvp:recent";
 const RECENT_MAX = 8;
+
+const LOADING_STEPS = [
+  "SEC EDGAR에서 공시 검색 중...",
+  "최신 보고서 다운로드 중...",
+  "재무제표 파싱 중...",
+  "메트릭 추출 중...",
+];
 
 function isFilingForm(value: string | null | undefined): value is FilingForm {
   return !!value && (FILING_FORMS as readonly string[]).includes(value);
@@ -44,6 +61,25 @@ function writeTickerList(key: string, list: string[]) {
 function clampPage(page: number, totalPages: number) {
   if (totalPages <= 1) return 1;
   return Math.min(Math.max(1, page), totalPages);
+}
+
+function formatLastUpdated(value: string | undefined) {
+  if (!value) return "-";
+  const trimmed = value.trim();
+  const parts = trimmed.split("T");
+  if (parts.length === 2) {
+    const date = parts[0];
+    const time = parts[1].split(".")[0].split("Z")[0];
+    return `${date} ${time}`;
+  }
+  return trimmed;
+}
+
+function formatChartValue(v: number): string {
+  const abs = Math.abs(v);
+  if (abs >= 1_000_000) return `${(v / 1_000_000).toFixed(1)}M`;
+  if (abs >= 1_000) return `${(v / 1_000).toFixed(1)}K`;
+  return v.toFixed(1);
 }
 
 function Pager(props: {
@@ -83,18 +119,6 @@ function Pager(props: {
   );
 }
 
-function formatLastUpdated(value: string | undefined) {
-  if (!value) return "-";
-  const trimmed = value.trim();
-  const parts = trimmed.split("T");
-  if (parts.length === 2) {
-    const date = parts[0];
-    const time = parts[1].split(".")[0].split("Z")[0];
-    return `${date} ${time}`;
-  }
-  return trimmed;
-}
-
 export default function Dashboard() {
   const [ticker, setTicker] = useState("AAPL");
   const [form, setForm] = useState<FilingForm>("10-Q");
@@ -113,6 +137,10 @@ export default function Dashboard() {
   const [favorites, setFavorites] = useState<string[]>([]);
   const [recent, setRecent] = useState<string[]>([]);
 
+  const [loadingStep, setLoadingStep] = useState(0);
+  const [elapsedSec, setElapsedSec] = useState(0);
+  const [currentStepMsg, setCurrentStepMsg] = useState<string>("");
+
   const defaultApiBase =
     process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
   const [apiBaseUrl, setApiBaseUrl] = useState(defaultApiBase);
@@ -123,6 +151,25 @@ export default function Dashboard() {
 
   const isValidBaseUrl = (value: string) =>
     value.startsWith("http://") || value.startsWith("https://");
+
+  useEffect(() => {
+    if (!loading) {
+      setLoadingStep(0);
+      setElapsedSec(0);
+      setCurrentStepMsg("");
+      return;
+    }
+    const stepTimer = setInterval(() => {
+      setLoadingStep((prev) => (prev + 1) % LOADING_STEPS.length);
+    }, 3000);
+    const secTimer = setInterval(() => {
+      setElapsedSec((prev) => prev + 1);
+    }, 1000);
+    return () => {
+      clearInterval(stepTimer);
+      clearInterval(secTimer);
+    };
+  }, [loading]);
 
   useEffect(() => {
     let active = true;
@@ -142,8 +189,6 @@ export default function Dashboard() {
           !!envOverride &&
           (envOverride.includes("localhost") || envOverride.includes("127.0.0.1"));
 
-        // 배포 환경에서는 runtime config(config.json)를 우선한다.
-        // NEXT_PUBLIC_API_BASE_URL 이 localhost 로 bake-in 된 경우 원격 접속에서 ERR_CONNECTION 을 유발할 수 있다.
         const resolvedBase = isLocalhost
           ? envOverride || localFallbackBase
           : nextBase || (!isEnvLocalhost ? envOverride : undefined);
@@ -166,7 +211,6 @@ export default function Dashboard() {
     };
   }, []);
 
-  // 첫 마운트 시 URL 쿼리에서 ticker/form 을 복원하고, ticker 가 있으면 자동 분석 예약
   useEffect(() => {
     if (typeof window === "undefined") return;
     const params = new URLSearchParams(window.location.search);
@@ -177,7 +221,6 @@ export default function Dashboard() {
     if (t) setPendingAutoAnalyze(true);
   }, []);
 
-  // 첫 마운트 시 localStorage 에서 즐겨찾기/최근 본 종목 복원
   useEffect(() => {
     setFavorites(readTickerList(FAVORITES_KEY));
     setRecent(readTickerList(RECENT_KEY));
@@ -197,7 +240,6 @@ export default function Dashboard() {
     setFavorites((prev) =>
       prev.includes(upper) ? prev.filter((x) => x !== upper) : [...prev, upper]
     );
-    // 즐겨찾기에 추가되면 "최근" 에서는 빼서 중복 노출을 막음
     setRecent((prev) => prev.filter((x) => x !== upper));
   }
 
@@ -209,7 +251,6 @@ export default function Dashboard() {
     setPendingAutoAnalyze(true);
   }
 
-  // ticker / form 변경 시 URL 쿼리스트링과 동기화 (replaceState 로 히스토리 오염 방지)
   useEffect(() => {
     if (typeof window === "undefined") return;
     const url = new URL(window.location.href);
@@ -312,72 +353,71 @@ export default function Dashboard() {
     economicPage * EARNINGS_PAGE_SIZE,
   );
 
-  // URL 로 진입한 경우 apiBaseUrl 안정화 후 한 번 자동 분석
   useEffect(() => {
     if (!pendingAutoAnalyze) return;
     if (!ticker.trim()) return;
     if (!isValidBaseUrl(normalizeBaseUrl(apiBaseUrl))) return;
     setPendingAutoAnalyze(false);
     analyze();
-    // analyze 는 ticker/form/apiBaseUrl 을 closure 로 사용하므로 deps 에 안 넣음
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingAutoAnalyze, ticker, form, apiBaseUrl]);
 
-  async function analyze() {
+  function analyze() {
     if (!ticker.trim()) {
       setInputError("Ticker를 입력하세요");
       return;
     }
 
-    try {
-      setLoading(true);
-      setError(null);
-      setErrorCode(null);
-      setData(null);
+    setLoading(true);
+    setError(null);
+    setErrorCode(null);
+    setData(null);
 
-      const baseUrl = normalizeBaseUrl(apiBaseUrl);
-      const encodedTicker = encodeURIComponent(ticker.trim());
-      const encodedForm = encodeURIComponent(form);
+    const baseUrl = normalizeBaseUrl(apiBaseUrl);
+    const encodedTicker = encodeURIComponent(ticker.trim());
+    const encodedForm = encodeURIComponent(form);
+    const url = `${baseUrl}/analyze/stream?ticker=${encodedTicker}&form=${encodedForm}`;
 
-      const res = await fetch(
-        `${baseUrl}/analyze?ticker=${encodedTicker}&form=${encodedForm}`
-      );
-      if (!res.ok) {
-        let errorMessage = "요청에 실패했습니다";
-        let code: string | null = null;
-        try {
-          const payload = (await res.json()) as { message?: string; code?: string };
-          if (payload?.message) errorMessage = payload.message;
-          if (payload?.code) code = payload.code;
-        } catch {
-          if (res.status === 404) {
-            errorMessage = "해당 보고서를 찾을 수 없습니다";
-            code = "not_found";
-          } else {
-            errorMessage = `HTTP ${res.status}`;
-          }
+    const es = new EventSource(url);
+
+    es.onmessage = (e) => {
+      let parsed: { type: string; message?: string; code?: string; status?: number; data?: AnalyzeResponse };
+      try {
+        parsed = JSON.parse(e.data) as typeof parsed;
+      } catch {
+        return;
+      }
+
+      if (parsed.type === "progress" && parsed.message) {
+        setLoadingStep(LOADING_STEPS.indexOf(parsed.message) >= 0
+          ? LOADING_STEPS.indexOf(parsed.message)
+          : loadingStep);
+        setCurrentStepMsg(parsed.message);
+      } else if (parsed.type === "result" && parsed.data) {
+        es.close();
+        setData(parsed.data);
+        setLoading(false);
+        const upperTicker = ticker.trim().toUpperCase();
+        if (upperTicker) {
+          setRecent((prev) => {
+            if (favorites.includes(upperTicker)) return prev;
+            const filtered = prev.filter((x) => x !== upperTicker);
+            return [upperTicker, ...filtered].slice(0, RECENT_MAX);
+          });
         }
-        setErrorCode(code);
-        throw new Error(errorMessage);
+      } else if (parsed.type === "error") {
+        es.close();
+        setErrorCode(parsed.code ?? null);
+        setError(parsed.message ?? "요청에 실패했습니다");
+        setLoading(false);
       }
-      const json: AnalyzeResponse = await res.json();
-      setData(json);
+    };
 
-      // 분석 성공 시 즐겨찾기에 없는 ticker 만 "최근 본 종목" 에 기록
-      const upperTicker = ticker.trim().toUpperCase();
-      if (upperTicker) {
-        setRecent((prev) => {
-          if (favorites.includes(upperTicker)) return prev;
-          const filtered = prev.filter((x) => x !== upperTicker);
-          return [upperTicker, ...filtered].slice(0, RECENT_MAX);
-        });
-      }
-    } catch (e) {
-      const message = e instanceof Error ? e.message : "Request failed";
-      setError(message);
-    } finally {
+    es.onerror = () => {
+      es.close();
+      setError("서버 연결에 실패했습니다. 잠시 후 다시 시도해 주세요.");
       setLoading(false);
-    }
+    };
   }
 
   const formatNumber = (value: number | null | undefined) => {
@@ -387,7 +427,7 @@ export default function Dashboard() {
 
   const formatPct = (value: number | null | undefined) => {
     if (value == null) return "N/A";
-    const sign = value > 0 ? "+" : value < 0 ? "" : "";
+    const sign = value > 0 ? "+" : "";
     return `${sign}${value.toFixed(1)}%`;
   };
 
@@ -395,17 +435,19 @@ export default function Dashboard() {
     const current = metric?.current ?? null;
     const previous = metric?.previous ?? null;
     const change = metric?.change_pct ?? null;
+    const isPositive = change !== null && change > 0;
+    const isNegative = change !== null && change < 0;
     return (
-      <tr key={label}>
-        <td className="text-left font-medium">{label}</td>
-        <td className="text-right">{formatNumber(current)}</td>
-        <td className="text-right">{formatNumber(previous)}</td>
-        <td className="text-right">{formatPct(change)}</td>
+      <tr key={label} className="hover:bg-slate-50 transition-colors">
+        <td className="text-left font-medium py-2 px-3 text-sm text-slate-700">{label}</td>
+        <td className="text-right py-2 px-3 text-sm font-mono">{formatNumber(current)}</td>
+        <td className="text-right py-2 px-3 text-sm font-mono text-slate-500">{formatNumber(previous)}</td>
+        <td className={`text-right py-2 px-3 text-sm font-medium ${isPositive ? "text-green-600" : isNegative ? "text-red-500" : "text-slate-500"}`}>
+          {formatPct(change)}
+        </td>
       </tr>
     );
   };
-
-  // ---------------- 공통 유틸 ----------------
 
   function sanitizeHtml(html: string): string {
     return DOMPurify.sanitize(html, {
@@ -414,474 +456,528 @@ export default function Dashboard() {
     });
   }
 
-  // ---------------- 렌더 ----------------
+  const chartData = data?.metrics
+    ? [
+        {
+          name: "Revenue",
+          current: data.metrics.revenue?.current ?? 0,
+          previous: data.metrics.revenue?.previous ?? 0,
+        },
+        {
+          name: "Net Income",
+          current: data.metrics.net_income?.current ?? 0,
+          previous: data.metrics.net_income?.previous ?? 0,
+        },
+        {
+          name: "FCF",
+          current: data.metrics.free_cash_flow?.current ?? 0,
+          previous: data.metrics.free_cash_flow?.previous ?? 0,
+        },
+      ]
+    : null;
+
+  const hasChartData =
+    chartData !== null &&
+    chartData.some((d) => d.current !== 0 || d.previous !== 0);
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-slate-50 via-white to-slate-50">
-      <div className="max-w-7xl mx-auto p-6 space-y-6">
-        <div className="rounded-2xl bg-gradient-to-r from-slate-900 to-slate-700 text-white p-6 shadow">
-          <h1 className="text-3xl font-semibold tracking-tight">SEC Filing Dashboard</h1>
+      <div className="max-w-7xl mx-auto p-4 sm:p-6 space-y-4 sm:space-y-6">
+
+
+        <div className="rounded-2xl bg-gradient-to-r from-slate-900 to-slate-700 text-white p-5 sm:p-6 shadow">
+          <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight">SEC Filing Dashboard</h1>
           <p className="text-sm text-slate-200 mt-1">Statements and earnings in one place.</p>
         </div>
 
-      {/* 입력 영역 */}
-      <div className="bg-white rounded-xl shadow p-4 flex flex-wrap gap-4 items-center">
-        <div className="flex flex-col">
-          <div className="flex items-center justify-between mb-1 gap-2">
-            <span className="text-xs text-gray-500">Ticker</span>
+
+        <div className="bg-white rounded-xl shadow p-4">
+          <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center">
+
+            <div className="flex flex-col w-full sm:w-auto">
+              <div className="flex items-center justify-between mb-1 gap-2">
+                <span className="text-xs text-gray-500">Ticker</span>
+                <button
+                  type="button"
+                  onClick={() => toggleFavorite(ticker)}
+                  disabled={!ticker.trim()}
+                  className="text-sm leading-none disabled:opacity-30 hover:scale-110 transition-transform"
+                  aria-label="즐겨찾기 토글"
+                  title={
+                    favorites.includes(ticker.trim().toUpperCase())
+                      ? "즐겨찾기 해제"
+                      : "즐겨찾기 추가"
+                  }
+                >
+                  {favorites.includes(ticker.trim().toUpperCase()) ? "★" : "☆"}
+                </button>
+              </div>
+              <input
+                value={ticker}
+                onChange={(e) => {
+                  setTicker(e.target.value.toUpperCase());
+                  if (inputError) setInputError(null);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") analyze();
+                }}
+                className={`border rounded px-3 py-2 w-full sm:min-w-[140px] sm:w-auto ${
+                  inputError ? "border-red-500" : ""
+                }`}
+              />
+              <div className="h-4 mt-1">
+                {inputError && (
+                  <span className="text-xs text-red-600">{inputError}</span>
+                )}
+              </div>
+            </div>
+
+
+            <div className="flex flex-col w-full sm:w-auto">
+              <span className="text-xs text-gray-500 mb-1">Form</span>
+              <div className="flex flex-wrap gap-3 items-center">
+                {FILING_FORMS.map((f) => (
+                  <label key={f} className="flex gap-1 items-center text-sm cursor-pointer">
+                    <input
+                      type="radio"
+                      name="filing-form"
+                      checked={form === f}
+                      onChange={() => setForm(f)}
+                    />
+                    {f}
+                  </label>
+                ))}
+              </div>
+            </div>
+
             <button
-              type="button"
-              onClick={() => toggleFavorite(ticker)}
-              disabled={!ticker.trim()}
-              className="text-sm leading-none disabled:opacity-30 hover:scale-110 transition-transform"
-              aria-label="즐겨찾기 토글"
-              title={
-                favorites.includes(ticker.trim().toUpperCase())
-                  ? "즐겨찾기 해제"
-                  : "즐겨찾기 추가"
-              }
+              onClick={analyze}
+              className="sm:ml-auto bg-black text-white px-5 py-2 rounded hover:bg-gray-800 disabled:opacity-60 w-full sm:w-auto"
+              disabled={loading}
             >
-              {favorites.includes(ticker.trim().toUpperCase()) ? "★" : "☆"}
+              {loading ? "분석 중..." : "분석"}
             </button>
           </div>
-          <input
-            value={ticker}
-            onChange={(e) => {
-              setTicker(e.target.value.toUpperCase());
-              if (inputError) {
-                setInputError(null);
-              }
-            }}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                analyze();
-              }
-            }}
-            className={`border rounded px-3 py-2 min-w-[140px] ${
-              inputError ? "border-red-500" : ""
-            }`}
-          />
-          {/* 🔥 항상 자리를 차지하는 에러 영역 */}
-          <div className="h-4 mt-1">
-            {inputError && (
-              <span className="text-xs text-red-600">
-                {inputError}
-              </span>
+        </div>
+
+
+        {(favorites.length > 0 || recent.length > 0) && (
+          <div className="bg-white rounded-xl shadow p-3 space-y-2 overflow-x-auto">
+            {favorites.length > 0 && (
+              <div className="flex flex-nowrap gap-2 items-center min-w-0">
+                <span className="text-xs text-slate-500 mr-1 shrink-0">★ 즐겨찾기</span>
+                {favorites.map((t) => (
+                  <span
+                    key={t}
+                    className="inline-flex items-center text-xs border rounded-full bg-amber-50 border-amber-200 shrink-0"
+                  >
+                    <button
+                      type="button"
+                      onClick={() => selectTicker(t)}
+                      className="font-medium text-amber-800 hover:underline pl-2 pr-1 py-0.5"
+                    >
+                      {t}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => toggleFavorite(t)}
+                      aria-label={`${t} 즐겨찾기 제거`}
+                      className="text-amber-700 hover:text-amber-900 px-1.5 py-0.5"
+                    >
+                      ×
+                    </button>
+                  </span>
+                ))}
+              </div>
             )}
-          </div>
-        </div>
-
-        <div className="flex flex-col">
-          <span className="text-xs text-gray-500 mb-1">Form</span>
-          <div className="flex flex-wrap gap-4 items-center">
-            {FILING_FORMS.map((f) => (
-              <label key={f} className="flex gap-1 items-center text-sm">
-                <input
-                  type="radio"
-                  name="filing-form"
-                  checked={form === f}
-                  onChange={() => setForm(f)}
-                />
-                {f}
-              </label>
-            ))}
-          </div>
-        </div>
-
-        <button
-          onClick={analyze}
-          className="ml-auto bg-black text-white px-4 py-2 rounded hover:bg-gray-800 disabled:opacity-60"
-          disabled={loading}
-        >
-          {loading ? "분석 중..." : "분석"}
-        </button>
-      </div>
-
-      {(favorites.length > 0 || recent.length > 0) && (
-        <div className="bg-white rounded-xl shadow p-3 space-y-2">
-          {favorites.length > 0 && (
-            <div className="flex flex-wrap gap-2 items-center">
-              <span className="text-xs text-slate-500 mr-1">★ 즐겨찾기</span>
-              {favorites.map((t) => (
-                <span
-                  key={t}
-                  className="inline-flex items-center text-xs border rounded-full bg-amber-50 border-amber-200"
-                >
+            {recent.length > 0 && (
+              <div className="flex flex-nowrap gap-2 items-center min-w-0">
+                <span className="text-xs text-slate-500 mr-1 shrink-0">최근</span>
+                {recent.map((t) => (
                   <button
+                    key={t}
                     type="button"
                     onClick={() => selectTicker(t)}
-                    className="font-medium text-amber-800 hover:underline pl-2 pr-1 py-0.5"
+                    className="text-xs border rounded-full px-2 py-0.5 hover:bg-slate-50 shrink-0"
                   >
                     {t}
                   </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+
+        {error && (
+          <div className="bg-red-50 text-red-700 border border-red-200 rounded p-3 text-sm">
+            <p>{error}</p>
+            {errorCode === "no_financial_data" && (
+              <div className="mt-2 flex flex-wrap gap-2 items-center">
+                <span className="text-xs text-red-600">다른 보고서로 다시 시도:</span>
+                {FILING_FORMS.filter((f) => f !== form).map((f) => (
                   <button
+                    key={f}
                     type="button"
-                    onClick={() => toggleFavorite(t)}
-                    aria-label={`${t} 즐겨찾기 제거`}
-                    title="즐겨찾기 제거"
-                    className="text-amber-700 hover:text-amber-900 px-1.5 py-0.5"
+                    onClick={() => {
+                      setForm(f);
+                      setPendingAutoAnalyze(true);
+                    }}
+                    className="text-xs border border-red-300 rounded px-2 py-0.5 bg-white text-red-700 hover:bg-red-100"
                   >
-                    ×
+                    {f}
                   </button>
-                </span>
-              ))}
-            </div>
-          )}
-          {recent.length > 0 && (
-            <div className="flex flex-wrap gap-2 items-center">
-              <span className="text-xs text-slate-500 mr-1">최근</span>
-              {recent.map((t) => (
-                <button
-                  key={t}
-                  type="button"
-                  onClick={() => selectTicker(t)}
-                  className="text-xs border rounded-full px-2 py-0.5 hover:bg-slate-50"
-                >
-                  {t}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
-      {error && (
-        <div className="bg-red-50 text-red-700 border border-red-200 rounded p-3 text-sm">
-          <p>{error}</p>
-          {errorCode === "no_financial_data" && (
-            <div className="mt-2 flex flex-wrap gap-2 items-center">
-              <span className="text-xs text-red-600">다른 보고서로 다시 시도:</span>
-              {FILING_FORMS.filter((f) => f !== form).map((f) => (
-                <button
-                  key={f}
-                  type="button"
-                  onClick={() => {
-                    setForm(f);
-                    setPendingAutoAnalyze(true);
-                  }}
-                  className="text-xs border border-red-300 rounded px-2 py-0.5 bg-white text-red-700 hover:bg-red-100"
-                >
-                  {f}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        <div className="lg:col-span-4 space-y-6">
-          <div className="bg-white rounded-xl shadow p-5">
-            <div className="flex items-center justify-between">
-              <h2 className="text-lg font-semibold">이번 주 캘린더 (실적/경제지표)</h2>
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+
+
+          <div className="order-1 lg:order-2 lg:col-span-8 space-y-6">
+
+
+            {loading && !data && (
+              <div className="space-y-4">
+                <div className="bg-white rounded-xl shadow p-5 animate-pulse">
+                  <div className="h-5 w-32 bg-slate-200 rounded mb-4" />
+                  <div className="h-4 w-3/4 bg-slate-100 rounded mb-2" />
+                  <div className="h-4 w-1/2 bg-slate-100 rounded mb-2" />
+                  <div className="h-4 w-2/3 bg-slate-100 rounded" />
+
+                  <div className="mt-5 pt-4 border-t border-slate-100">
+                    <div className="flex items-center gap-2">
+                      <span className="inline-block w-2 h-2 rounded-full bg-blue-400 animate-pulse" />
+                      <span className="text-xs text-slate-500">
+                        {currentStepMsg || LOADING_STEPS[loadingStep]}
+                      </span>
+                    </div>
+                    <div className="mt-1.5 flex items-center gap-3">
+                      <span className="text-xs text-slate-400">약 {elapsedSec}초 경과</span>
+                      {elapsedSec >= 15 && (
+                        <span className="text-xs text-slate-400">처음 조회는 30~60초 소요될 수 있습니다</span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+                <div className="bg-white rounded-xl shadow p-5 animate-pulse">
+                  <div className="h-5 w-24 bg-slate-200 rounded mb-4" />
+                  {Array.from({ length: 6 }).map((_, i) => (
+                    <div
+                      key={i}
+                      className={`h-3 bg-slate-100 rounded mb-2 ${i % 3 === 0 ? "w-full" : i % 3 === 1 ? "w-4/5" : "w-3/5"}`}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {data && (
+              <>
+
+                <div className="bg-white rounded-xl shadow p-5">
+                  <h2 className="text-xl font-semibold mb-2">개요</h2>
+                  <p className="font-medium text-slate-800">
+                    {data.meta.company_name} ({data.meta.ticker})
+                  </p>
+                  <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-sm text-gray-500">
+                    <span>{data.meta.report_type ?? "-"}</span>
+                    <span>기준일 {data.meta.period_end ?? "-"}</span>
+                    <span>단위 {data.meta.unit ?? "-"}</span>
+                  </div>
+                  {(data.meta.filing_date || data.meta.accession_number) && (
+                    <p className="mt-1 text-xs text-gray-400">
+                      공시일 {data.meta.filing_date || "-"} · Accession {data.meta.accession_number || "-"}
+                    </p>
+                  )}
+                  <div className="mt-2 flex flex-wrap gap-3 items-center">
+                    {data.meta.source_url && (
+                      <a
+                        className="text-xs text-blue-600 hover:underline"
+                        href={data.meta.source_url}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        원본 문서 보기 →
+                      </a>
+                    )}
+                    <span className="text-xs text-gray-400">
+                      최근 갱신: {formatLastUpdated(data.last_updated)}
+                    </span>
+                  </div>
+                </div>
+
+
+                {hasChartData && chartData && (
+                  <div className="bg-white rounded-xl shadow p-5">
+                    <div className="flex items-baseline justify-between gap-2 flex-wrap mb-4">
+                      <h2 className="text-xl font-semibold">핵심 지표 요약</h2>
+                      {data.meta.unit && (
+                        <span className="text-xs text-slate-500">단위 {data.meta.unit}</span>
+                      )}
+                    </div>
+                    <ResponsiveContainer width="100%" height={220}>
+                      <BarChart
+                        data={chartData}
+                        margin={{ top: 4, right: 8, left: 8, bottom: 4 }}
+                        barCategoryGap="30%"
+                        barGap={4}
+                      >
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                        <XAxis
+                          dataKey="name"
+                          tick={{ fontSize: 12, fill: "#64748b" }}
+                          axisLine={false}
+                          tickLine={false}
+                        />
+                        <YAxis
+                          tickFormatter={formatChartValue}
+                          tick={{ fontSize: 11, fill: "#94a3b8" }}
+                          axisLine={false}
+                          tickLine={false}
+                          width={52}
+                        />
+                        <Tooltip
+                          formatter={(value: number, name: string) => [
+                            formatChartValue(value),
+                            name === "current" ? "Current" : "Previous",
+                          ]}
+                          contentStyle={{ fontSize: 12, borderRadius: 8, border: "1px solid #e2e8f0" }}
+                        />
+                        <Legend
+                          formatter={(value) => (value === "current" ? "Current" : "Previous")}
+                          wrapperStyle={{ fontSize: 12 }}
+                        />
+                        <Bar dataKey="current" name="current" fill="#3b82f6" radius={[4, 4, 0, 0]} />
+                        <Bar dataKey="previous" name="previous" fill="#bfdbfe" radius={[4, 4, 0, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                )}
+
+
+                {data.metrics && (
+                  <div className="bg-white rounded-xl shadow p-5">
+                    <div className="flex items-baseline justify-between gap-2 flex-wrap mb-1">
+                      <h2 className="text-xl font-semibold">주요 지표</h2>
+                      <div className="text-xs text-slate-500">
+                        {data.meta.report_type && <span>{data.meta.report_type}</span>}
+                        {data.meta.period_end && <span> · 기준일 {data.meta.period_end}</span>}
+                        {data.meta.unit && <span> · 단위 {data.meta.unit}</span>}
+                      </div>
+                    </div>
+                    <p className="text-xs text-slate-400 mb-3">
+                      Current = 최근 보고 기간 / Previous = 직전 동기간
+                    </p>
+                    <div className="overflow-x-auto">
+                      <table className="w-full border-collapse">
+                        <thead>
+                          <tr className="border-b-2 border-slate-200">
+                            <th className="text-left py-2 px-3 text-xs font-semibold text-slate-600 uppercase tracking-wide">지표</th>
+                            <th className="text-right py-2 px-3 text-xs font-semibold text-slate-600 uppercase tracking-wide">Current</th>
+                            <th className="text-right py-2 px-3 text-xs font-semibold text-slate-600 uppercase tracking-wide">Previous</th>
+                            <th className="text-right py-2 px-3 text-xs font-semibold text-slate-600 uppercase tracking-wide">변동률</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-50">
+                          {renderMetricRow("Revenue", data.metrics.revenue)}
+                          {renderMetricRow("Gross Profit", data.metrics.gross_profit)}
+                          {renderMetricRow("Operating Income", data.metrics.operating_income)}
+                          {renderMetricRow("Net Income", data.metrics.net_income)}
+                          {renderMetricRow("EPS (Basic)", data.metrics.eps_basic)}
+                          {renderMetricRow("Cash & Equivalents", data.metrics.cash_and_equivalents)}
+                          {renderMetricRow("Total Assets", data.metrics.total_assets)}
+                          {renderMetricRow("Total Liabilities", data.metrics.total_liabilities)}
+                          {renderMetricRow("Total Equity", data.metrics.total_equity)}
+                          {renderMetricRow("Long-term Debt", data.metrics.long_term_debt)}
+                          {renderMetricRow("Operating Cash Flow", data.metrics.operating_cash_flow)}
+                          {renderMetricRow("Capex", data.metrics.capex)}
+                          {renderMetricRow("Free Cash Flow", data.metrics.free_cash_flow)}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+
+
+                {data.tables?.income_statement && (
+                  <div className="bg-white rounded-xl shadow p-5">
+                    <div className="flex items-baseline justify-between gap-2 flex-wrap mb-3">
+                      <h2 className="text-xl font-bold">손익계산서</h2>
+                      {data.meta.unit && (
+                        <span className="text-xs text-slate-500">단위 {data.meta.unit}</span>
+                      )}
+                    </div>
+                    <div className="filing-table-wrapper overflow-x-auto max-h-[500px] overflow-y-auto rounded border border-slate-100">
+                      <div
+                        dangerouslySetInnerHTML={{
+                          __html: annotateTableHTML(sanitizeHtml(data.tables.income_statement), "income"),
+                        }}
+                      />
+                    </div>
+                  </div>
+                )}
+
+
+                {data.tables?.balance_sheet && (
+                  <div className="bg-white rounded-xl shadow p-5">
+                    <div className="flex items-baseline justify-between gap-2 flex-wrap mb-3">
+                      <h2 className="text-xl font-bold">재무상태표</h2>
+                      {data.meta.unit && (
+                        <span className="text-xs text-slate-500">단위 {data.meta.unit}</span>
+                      )}
+                    </div>
+                    <div className="filing-table-wrapper overflow-x-auto max-h-[500px] overflow-y-auto rounded border border-slate-100">
+                      <div
+                        dangerouslySetInnerHTML={{
+                          __html: annotateTableHTML(sanitizeHtml(data.tables.balance_sheet), "balance"),
+                        }}
+                      />
+                    </div>
+                  </div>
+                )}
+
+
+                {data.tables?.cash_flow && (
+                  <div className="bg-white rounded-xl shadow p-5">
+                    <div className="flex items-baseline justify-between gap-2 flex-wrap mb-3">
+                      <h2 className="text-xl font-bold">현금흐름표</h2>
+                      {data.meta.unit && (
+                        <span className="text-xs text-slate-500">단위 {data.meta.unit}</span>
+                      )}
+                    </div>
+                    <div className="filing-table-wrapper overflow-x-auto max-h-[500px] overflow-y-auto rounded border border-slate-100">
+                      <div
+                        dangerouslySetInnerHTML={{
+                          __html: annotateTableHTML(sanitizeHtml(data.tables.cash_flow), "cash"),
+                        }}
+                      />
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+
+
+          <div className="order-2 lg:order-1 lg:col-span-4 space-y-6">
+            <div className="bg-white rounded-xl shadow p-5">
+              <div className="flex items-center justify-between mb-1">
+                <h2 className="text-base sm:text-lg font-semibold">이번 주 캘린더</h2>
                 <a
                   className="text-xs text-slate-500 hover:underline"
                   href="https://www.nasdaq.com/market-activity/earnings"
                   target="_blank"
                   rel="noreferrer"
                 >
-                출처
-              </a>
-            </div>
-            {earningsLoading && <p className="text-sm text-slate-500 mt-3">불러오는 중...</p>}
-            {earningsError && (
-              <p className="text-sm text-red-600 mt-3">실적 데이터를 불러오지 못했습니다.</p>
-            )}
-            {!earningsLoading && !earningsError && earnings && earnings.length === 0 && (
-              <p className="text-sm text-slate-500 mt-3">이번 주 발표 예정/완료된 실적이 없습니다.</p>
-            )}
-
-            {earnings && earnings.length > 0 && (
-              <div className="mt-4 space-y-4">
-                <div>
-                  <div className="text-xs font-medium text-slate-500">발표 예정</div>
-                  <div className="mt-2 space-y-2">
-                    {upcomingPageItems.map((it, idx) => (
-                      <div key={`${it.ticker || "x"}-${idx}`} className="border rounded-lg p-3">
-                        <div className="flex items-center justify-between gap-2">
-                          <div className="font-medium text-sm">{it.ticker || "-"}</div>
-                          <div className="text-xs text-slate-500">
-                            {(it.report_date || "-") + " · " + (it.release_time || "TBD")}
-                          </div>
-                        </div>
-                        <div className="text-xs text-slate-600 mt-1 line-clamp-2">{it.company || "-"}</div>
-                        <div className="flex gap-3 mt-2 text-xs">
-                          {it.earnings_release_url && (
-                            <a className="text-blue-600 hover:underline" href={it.earnings_release_url} target="_blank" rel="noreferrer">
-                              SEC 8-Ks
-                            </a>
-                          )}
-                          {it.transcript_search_url && (
-                            <a className="text-blue-600 hover:underline" href={it.transcript_search_url} target="_blank" rel="noreferrer">
-                              Find Transcript
-                            </a>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                  <Pager
-                    page={upcomingPage}
-                    totalItems={upcoming.length}
-                    pageSize={EARNINGS_PAGE_SIZE}
-                    onChange={setUpcomingPage}
-                  />
-                </div>
-
-                <div>
-                  <div className="text-xs font-medium text-slate-500">발표 완료</div>
-                  <div className="mt-2 space-y-2">
-                    {reportedPageItems.map((it, idx) => (
-                      <div key={`${it.ticker || "y"}-${idx}`} className="border rounded-lg p-3 bg-slate-50">
-                        <div className="flex items-center justify-between gap-2">
-                          <div className="font-medium text-sm">{it.ticker || "-"}</div>
-                          <div className="text-xs text-slate-500">
-                            {(it.report_date || "-") + " · " + (it.release_time || "TBD")}
-                          </div>
-                        </div>
-                        <div className="text-xs text-slate-600 mt-1 line-clamp-2">{it.company || "-"}</div>
-                        <div className="grid grid-cols-2 gap-2 mt-2 text-xs text-slate-700">
-                          <div>EPS: {it.eps_actual || "-"} / {it.eps_estimate || "-"}</div>
-                          <div>Rev: {it.revenue_actual || "-"} / {it.revenue_estimate || "-"}</div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                  <Pager page={reportedPage} totalItems={reported.length} pageSize={EARNINGS_PAGE_SIZE} onChange={setReportedPage} />
-                </div>
-
-                <div>
-                  <div className="text-xs font-medium text-indigo-600">경제지표</div>
-                  <div className="mt-2 space-y-2">
-                    {economicPageItems.map((it, idx) => (
-                      <div key={`${it.event || "ev"}-${idx}`} className="border rounded-lg p-3 bg-indigo-50/40">
-                        <div className="flex items-center justify-between gap-2">
-                          <div className="font-medium text-sm">{it.event || "-"}</div>
-                          <div className="text-xs text-slate-500">{it.event_date || "-"}</div>
-                        </div>
-                        <div className="text-xs text-slate-600 mt-1">
-                          {(it.country || "-") + " · " + (it.importance || "-")}
-                          {it.release_time && ` · ${it.release_time}`}
-                        </div>
-                        {(it.actual || it.consensus || it.previous) && (
-                          <div className="text-xs text-slate-500 mt-2 grid grid-cols-3 gap-1 bg-white/70 p-2 rounded border border-indigo-100/50">
-                            <div>실제: <span className="font-medium text-slate-800">{it.actual || "-"}</span></div>
-                            <div>예측: <span className="font-medium text-slate-800">{it.consensus || "-"}</span></div>
-                            <div>이전: <span className="font-medium text-slate-800">{it.previous || "-"}</span></div>
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                  <Pager page={economicPage} totalItems={economic.length} pageSize={EARNINGS_PAGE_SIZE} onChange={setEconomicPage} />
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-
-        <div className="lg:col-span-8 space-y-6">
-          {loading && !data && (
-            <>
-              <div className="bg-white rounded-xl shadow p-5 animate-pulse">
-                <div className="h-5 w-24 bg-slate-200 rounded mb-3" />
-                <div className="h-4 w-3/4 bg-slate-100 rounded mb-2" />
-                <div className="h-4 w-1/2 bg-slate-100 rounded" />
-                <p className="text-xs text-slate-500 mt-4 not-italic">
-                  SEC 에서 보고서를 받아 파싱하는 중입니다. 첫 호출은 수십 초가 걸릴 수 있어요.
-                </p>
-              </div>
-              <div className="bg-white rounded-xl shadow p-5 animate-pulse">
-                <div className="h-5 w-32 bg-slate-200 rounded mb-3" />
-                {Array.from({ length: 6 }).map((_, i) => (
-                  <div key={i} className="h-3 w-full bg-slate-100 rounded mb-2" />
-                ))}
-              </div>
-            </>
-          )}
-          {data && (
-            <>
-          {/* 메타 */}
-          <div className="bg-white rounded-xl shadow p-5">
-            <h2 className="text-xl font-semibold mb-1">개요</h2>
-            <p className="font-medium">
-              {data.meta.company_name} ({data.meta.ticker})
-            </p>
-            <p className="text-sm text-gray-600">
-              {data.meta.report_type ?? "-"} · 기준일 {data.meta.period_end ?? "-"} · 단위 {data.meta.unit ?? "-"}
-            </p>
-            {(data.meta.filing_date || data.meta.accession_number) && (
-              <p className="mt-1 text-xs text-gray-500">
-                공시일 {data.meta.filing_date || "-"} · Accession {data.meta.accession_number || "-"}
-              </p>
-            )}
-            {data.meta.source_url && (
-              <p className="mt-1 text-xs">
-                <a
-                  className="text-blue-600 hover:underline"
-                  href={data.meta.source_url}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  원본 문서 보기
+                  출처
                 </a>
-              </p>
-            )}
-            <p className="mt-1 text-xs text-gray-400">
-              최근 갱신: {formatLastUpdated(data.last_updated)}
-            </p>
+              </div>
+              <p className="text-xs text-slate-400 mb-3">실적 발표 · 경제지표</p>
+
+              {earningsLoading && <p className="text-sm text-slate-500 mt-3">불러오는 중...</p>}
+              {earningsError && (
+                <p className="text-sm text-red-600 mt-3">실적 데이터를 불러오지 못했습니다.</p>
+              )}
+              {!earningsLoading && !earningsError && earnings.length === 0 && (
+                <p className="text-sm text-slate-500 mt-3">이번 주 발표 예정/완료된 실적이 없습니다.</p>
+              )}
+
+              {earnings.length > 0 && (
+                <div className="mt-2 space-y-5">
+
+                  <div>
+                    <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">발표 예정</div>
+                    <div className="space-y-2">
+                      {upcomingPageItems.map((it, idx) => (
+                        <div key={`${it.ticker || "x"}-${idx}`} className="border rounded-lg p-3">
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="font-semibold text-sm">{it.ticker || "-"}</div>
+                            <div className="text-xs text-slate-500">
+                              {(it.report_date || "-")} · {it.release_time || "TBD"}
+                            </div>
+                          </div>
+                          <div className="text-xs text-slate-500 mt-0.5 line-clamp-1">{it.company || "-"}</div>
+                          <div className="flex gap-3 mt-2 text-xs">
+                            {it.earnings_release_url && (
+                              <a className="text-blue-600 hover:underline" href={it.earnings_release_url} target="_blank" rel="noreferrer">
+                                SEC 8-Ks
+                              </a>
+                            )}
+                            {it.transcript_search_url && (
+                              <a className="text-blue-600 hover:underline" href={it.transcript_search_url} target="_blank" rel="noreferrer">
+                                Transcript
+                              </a>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    <Pager page={upcomingPage} totalItems={upcoming.length} pageSize={EARNINGS_PAGE_SIZE} onChange={setUpcomingPage} />
+                  </div>
+
+
+                  {reported.length > 0 && (
+                    <div>
+                      <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">발표 완료</div>
+                      <div className="space-y-2">
+                        {reportedPageItems.map((it, idx) => (
+                          <div key={`${it.ticker || "y"}-${idx}`} className="border rounded-lg p-3 bg-slate-50">
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="font-semibold text-sm">{it.ticker || "-"}</div>
+                              <div className="text-xs text-slate-500">
+                                {(it.report_date || "-")} · {it.release_time || "TBD"}
+                              </div>
+                            </div>
+                            <div className="text-xs text-slate-500 mt-0.5 line-clamp-1">{it.company || "-"}</div>
+                            <div className="grid grid-cols-2 gap-1 mt-2 text-xs text-slate-600">
+                              <div>EPS: <span className="font-medium">{it.eps_actual || "-"}</span> / {it.eps_estimate || "-"}</div>
+                              <div>Rev: <span className="font-medium">{it.revenue_actual || "-"}</span> / {it.revenue_estimate || "-"}</div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                      <Pager page={reportedPage} totalItems={reported.length} pageSize={EARNINGS_PAGE_SIZE} onChange={setReportedPage} />
+                    </div>
+                  )}
+
+
+                  {economic.length > 0 && (
+                    <div>
+                      <div className="text-xs font-semibold text-indigo-600 uppercase tracking-wide mb-2">경제지표</div>
+                      <div className="space-y-2">
+                        {economicPageItems.map((it, idx) => (
+                          <div key={`${it.event || "ev"}-${idx}`} className="border rounded-lg p-3 bg-indigo-50/40">
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="font-medium text-sm leading-tight">{it.event || "-"}</div>
+                              <div className="text-xs text-slate-500 shrink-0">{it.event_date || "-"}</div>
+                            </div>
+                            <div className="text-xs text-slate-500 mt-0.5">
+                              {it.country || "US"} · {it.importance || "-"}
+                              {it.release_time && ` · ${it.release_time}`}
+                            </div>
+                            {(it.actual || it.consensus || it.previous) && (
+                              <div className="text-xs mt-2 grid grid-cols-3 gap-1 bg-white/70 p-2 rounded border border-indigo-100/50">
+                                <div className="text-slate-500">실제<br /><span className="font-semibold text-slate-800">{it.actual || "-"}</span></div>
+                                <div className="text-slate-500">예측<br /><span className="font-semibold text-slate-800">{it.consensus || "-"}</span></div>
+                                <div className="text-slate-500">이전<br /><span className="font-semibold text-slate-800">{it.previous || "-"}</span></div>
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                      <Pager page={economicPage} totalItems={economic.length} pageSize={EARNINGS_PAGE_SIZE} onChange={setEconomicPage} />
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
 
-          {data.metrics && (
-            <div className="bg-white rounded-xl shadow p-5 overflow-x-auto">
-              <div className="flex items-baseline justify-between gap-2 flex-wrap">
-                <h2 className="text-xl font-semibold">주요 지표</h2>
-                <div className="text-xs text-slate-500">
-                  {data.meta.report_type && <span>{data.meta.report_type}</span>}
-                  {data.meta.period_end && <span> · 기준일 {data.meta.period_end}</span>}
-                  {data.meta.unit && <span> · 단위 {data.meta.unit}</span>}
-                </div>
-              </div>
-              <p className="text-xs text-slate-500 mt-1 mb-3">
-                Current = 가장 최근 보고 기간, Previous = 직전 동기간
-                (10-Q 는 동분기, 10-K 는 동연도, 재무상태표는 직전 회계연도 말).
-              </p>
-              <table>
-                <thead>
-                  <tr>
-                    <th className="text-left">지표</th>
-                    <th className="text-right">Current</th>
-                    <th className="text-right">Previous</th>
-                    <th className="text-right">변동률</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {renderMetricRow("Revenue", data.metrics.revenue)}
-                  {renderMetricRow("Gross Profit", data.metrics.gross_profit)}
-                  {renderMetricRow("Operating Income", data.metrics.operating_income)}
-                  {renderMetricRow("Net Income", data.metrics.net_income)}
-                  {renderMetricRow("EPS (Basic)", data.metrics.eps_basic)}
-                  {renderMetricRow("Cash & Equivalents", data.metrics.cash_and_equivalents)}
-                  {renderMetricRow("Total Assets", data.metrics.total_assets)}
-                  {renderMetricRow("Total Liabilities", data.metrics.total_liabilities)}
-                  {renderMetricRow("Total Equity", data.metrics.total_equity)}
-                  {renderMetricRow("Long-term Debt", data.metrics.long_term_debt)}
-                  {renderMetricRow("Operating Cash Flow", data.metrics.operating_cash_flow)}
-                  {renderMetricRow("Capex", data.metrics.capex)}
-                  {renderMetricRow("Free Cash Flow", data.metrics.free_cash_flow)}
-                </tbody>
-              </table>
-            </div>
-          )}
-
-
-
-          {/* 뱃지 + 기본 스타일 */}
-          <style>{`
-            .delta-badge {
-              display: inline-flex;
-              align-items: center;
-              font-size: 10px;
-              padding: 0 6px;
-              border-radius: 9999px;
-              margin-left: 4px;
-              white-space: nowrap;
-              border: 1px solid transparent;
-            }
-            .delta-up {
-              background-color: #ecfdf5;
-              color: #16a34a;
-              border-color: #bbf7d0;
-            }
-            .delta-down {
-              background-color: #fef2f2;
-              color: #dc2626;
-              border-color: #fecaca;
-            }
-            .delta-flat {
-              background-color: #f3f4f6;
-              color: #4b5563;
-              border-color: #e5e7eb;
-            }
-            .delta-na {
-              background-color: #f9fafb;
-              color: #9ca3af;
-              border-color: #e5e7eb;
-            }
-            table {
-              width: 100%;
-              border-collapse: collapse;
-            }
-            td, th {
-              padding: 4px 6px;
-              font-size: 11px;
-            }
-            .numeric-cell {
-              white-space: nowrap;
-            }
-            .numeric-cell * {
-              display: inline;
-              white-space: nowrap;
-            }
-            tr:hover {
-              background-color: #fafafa;
-            }
-          `}</style>
-
-          {/* Income */}
-          {data.tables?.income_statement && (
-            <div className="bg-white rounded-xl shadow p-5 overflow-x-auto">
-              <div className="flex items-baseline justify-between gap-2 flex-wrap mb-3">
-                <h2 className="text-xl font-bold">손익계산서</h2>
-                {data.meta.unit && (
-                  <span className="text-xs text-slate-500">단위 {data.meta.unit}</span>
-                )}
-              </div>
-              <div
-                dangerouslySetInnerHTML={{
-                  __html: annotateTableHTML(sanitizeHtml(data.tables.income_statement), "income"),
-                }}
-              />
-            </div>
-          )}
-
-          {/* Balance */}
-          {data.tables?.balance_sheet && (
-            <div className="bg-white rounded-xl shadow p-5 overflow-x-auto">
-              <div className="flex items-baseline justify-between gap-2 flex-wrap mb-3">
-                <h2 className="text-xl font-bold">재무상태표</h2>
-                {data.meta.unit && (
-                  <span className="text-xs text-slate-500">단위 {data.meta.unit}</span>
-                )}
-              </div>
-              <div
-                dangerouslySetInnerHTML={{
-                  __html: annotateTableHTML(sanitizeHtml(data.tables.balance_sheet), "balance"),
-                }}
-              />
-            </div>
-          )}
-
-          {/* Cash Flow */}
-          {data.tables?.cash_flow && (
-            <div className="bg-white rounded-xl shadow p-5 overflow-x-auto">
-              <div className="flex items-baseline justify-between gap-2 flex-wrap mb-3">
-                <h2 className="text-xl font-bold">현금흐름표</h2>
-                {data.meta.unit && (
-                  <span className="text-xs text-slate-500">단위 {data.meta.unit}</span>
-                )}
-              </div>
-              <div
-                dangerouslySetInnerHTML={{
-                  __html: annotateTableHTML(sanitizeHtml(data.tables.cash_flow), "cash"),
-                }}
-              />
-            </div>
-          )}
-            </>
-          )}
         </div>
-      </div>
       </div>
     </div>
   );

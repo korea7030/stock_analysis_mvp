@@ -2,7 +2,7 @@ import os
 import re
 import warnings
 from datetime import datetime
-from typing import Any
+from typing import Any, Callable
 
 from bs4 import BeautifulSoup, XMLParsedAsHTMLWarning
 from sec_downloader import Downloader
@@ -644,22 +644,30 @@ def extract_sections(
 # 메인 분석
 # ----------------------------
 
-def run_analysis(ticker: str, form: str = "10-Q") -> dict[str, Any]:
+def run_analysis(
+    ticker: str,
+    form: str = "10-Q",
+    progress_cb: "Callable[[str], None] | None" = None,
+) -> dict[str, Any]:
+    def _emit(msg: str) -> None:
+        if progress_cb is not None:
+            progress_cb(msg)
+
     dl = Downloader(
         company_name="Stock Analysis MVP",
         email_address="korea7030.jhl@gmail.com"
     )
-    
-    html, filing_meta, source_url = _get_best_filing_html(dl, ticker=ticker, form=form)
-        
-    # with open('test.html', 'w') as f:
-    #     f.write(html)
 
+    _emit("SEC EDGAR에서 공시 검색 중...")
+    html, filing_meta, source_url = _get_best_filing_html(dl, ticker=ticker, form=form)
+
+    _emit("재무제표 파싱 중...")
     income_html, balance_html, cashflow_html = extract_raw_tables(html)
 
     if income_html:
         income_html = annotate_income_html(income_html)
 
+    _emit("메트릭 추출 중...")
     schema: dict[str, Any] = init_schema()
     meta = extract_meta(html, ticker, form)
     schema["meta"] = meta
@@ -676,6 +684,7 @@ def run_analysis(ticker: str, form: str = "10-Q") -> dict[str, Any]:
         "cash_flow": cashflow_html,
     }
 
+    _emit("완료")
     return schema
 
 

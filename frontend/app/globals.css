@@ -2,6 +2,14 @@
 @tailwind components;
 @tailwind utilities;
 
+.filing-table-wrapper table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.filing-table-wrapper th { position: sticky; top: 0; background: white; z-index: 1; font-weight: 600; padding: 8px 10px; border-bottom: 2px solid #e2e8f0; text-align: right; }
+.filing-table-wrapper th:first-child { text-align: left; }
+.filing-table-wrapper td { padding: 5px 10px; border-bottom: 1px solid #f1f5f9; text-align: right; vertical-align: top; }
+.filing-table-wrapper td:first-child { text-align: left; max-width: 280px; }
+.filing-table-wrapper tr:hover { background-color: #f8fafc; }
+.filing-table-wrapper tr:last-child td { border-bottom: none; }
+
 .delta-badge {
     display: inline-flex;
     align-items: center;

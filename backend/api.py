@@ -1,17 +1,19 @@
 import os
 import re
 import json
+import queue
+import threading
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Optional
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, Query
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 
-from backend.analyzer import run_analysis   # 수정된 analyzer (원본 표 HTML 포함)
+from backend.analyzer import run_analysis
  
 from backend.clients import get_logical_today
 from backend.cache import TTLCache
@@ -147,6 +149,98 @@ async def analyze(
             message="Analysis failed",
             details=str(e),
         )
+
+
+@app.get("/analyze/stream")
+async def analyze_stream(
+    ticker: str = Query(...),
+    form: str = Query("10-Q"),
+):
+    try:
+        normalized_ticker = _normalize_ticker(ticker)
+        normalized_form = _normalize_form(form)
+    except ValueError as validation_error:
+        async def _validation_err():
+            payload = json.dumps({"type": "error", "code": "validation_error", "message": str(validation_error)})
+            yield f"data: {payload}\n\n"
+        return StreamingResponse(_validation_err(), media_type="text/event-stream")
+
+    cache_key = f"analyze:{normalized_ticker}:{normalized_form}"
+    cached_payload = _analyze_cache.get(cache_key)
+    if cached_payload is not None:
+        cached_last_updated = _last_updated_if_today(cached_payload.get("last_updated"))
+        if cached_last_updated is None:
+            cached_payload = dict(cached_payload)
+            cached_payload.pop("last_updated", None)
+
+        if not _has_financial_data(cached_payload):
+            async def _no_data_cached():
+                payload = json.dumps({"type": "error", "code": "no_financial_data", "message": "해당 보고서에는 재무제표/지표 데이터가 없습니다. 다른 보고서를 선택해 주세요."})
+                yield f"data: {payload}\n\n"
+            return StreamingResponse(_no_data_cached(), media_type="text/event-stream")
+
+        async def _cached():
+            yield f"data: {json.dumps({'type': 'progress', 'message': '캐시에서 로드 중...'})}\n\n"
+            yield f"data: {json.dumps({'type': 'result', 'data': cached_payload})}\n\n"
+        return StreamingResponse(_cached(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+    event_queue: queue.Queue[dict[str, Any]] = queue.Queue()
+
+    def _run() -> None:
+        try:
+            def _on_progress(msg: str) -> None:
+                event_queue.put({"type": "progress", "message": msg})
+
+            schema = run_analysis(normalized_ticker, normalized_form, progress_cb=_on_progress)
+            event_queue.put({"type": "_schema", "schema": schema})
+        except Exception as exc:
+            event_queue.put({"type": "_error", "exc": exc})
+
+    thread = threading.Thread(target=_run, daemon=True)
+    thread.start()
+
+    async def _stream():
+        while True:
+            try:
+                event = event_queue.get(timeout=0.1)
+            except queue.Empty:
+                if not thread.is_alive():
+                    break
+                yield ": keep-alive\n\n"
+                continue
+
+            if event["type"] == "progress":
+                yield f"data: {json.dumps({'type': 'progress', 'message': event['message']})}\n\n"
+
+            elif event["type"] == "_error":
+                exc = event["exc"]
+                message = str(exc)
+                if "Could not find any filings" in message or "Could not find filing for" in message:
+                    code, status = "not_found", 404
+                    message = "해당 보고서를 찾을 수 없습니다"
+                else:
+                    code, status = "internal_error", 500
+                yield f"data: {json.dumps({'type': 'error', 'code': code, 'status': status, 'message': message})}\n\n"
+                break
+
+            elif event["type"] == "_schema":
+                schema = event["schema"]
+                response_model = _build_analyze_response_model(schema, normalized_ticker, normalized_form)
+                response_payload = _model_to_dict(response_model)
+
+                if not _has_financial_data(schema):
+                    yield f"data: {json.dumps({'type': 'error', 'code': 'no_financial_data', 'status': 422, 'message': '해당 보고서에는 재무제표/지표 데이터가 없습니다. 다른 보고서를 선택해 주세요.'})}\n\n"
+                    break
+
+                _analyze_cache.set(cache_key, response_payload, ANALYZE_CACHE_TTL_S)
+                yield f"data: {json.dumps({'type': 'result', 'data': response_payload})}\n\n"
+                break
+
+    return StreamingResponse(
+        _stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @app.get("/")
