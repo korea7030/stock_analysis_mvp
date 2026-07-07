@@ -515,7 +515,7 @@ def calendar(
     if rate_limit_response is not None:
         return rate_limit_response
 
-    cache_key = f"calendar:w{weeks}:k={kind or ''}:s={status or ''}:c={country or ''}:i={importance or ''}:t={ticker or ''}"
+    cache_key = f"calendar:v2:w{weeks}:k={kind or ''}:s={status or ''}:c={country or ''}:i={importance or ''}:t={ticker or ''}"
     cached_payload = _calendar_cache.get(cache_key)
     if cached_payload is not None:
         return cached_payload
@@ -547,11 +547,11 @@ def calendar(
         importance=importance,
         ticker=ticker,
     )
-    filtered.sort(key=lambda it: ((it.get("event_date") or "9999-99-99"), (it.get("ticker") or it.get("event") or "")))
+    filtered.sort(key=_calendar_sort_key)
 
     desired_total = int(filter_cfg.get("desired_total", 23) or 23)
     if desired_total > 0:
-        filtered = filtered[:desired_total]
+        filtered = _cap_calendar_items(filtered, desired_total=desired_total, earnings_cap=earnings_cap)
 
     _calendar_cache.set(cache_key, filtered, EARNINGS_CACHE_TTL_S)
     save_response_cache(cache_key=cache_key, payload=filtered, ttl_s=EARNINGS_CACHE_TTL_S)
@@ -904,7 +904,7 @@ def _fetch_earnings_items() -> list[dict[str, Any]]:
         if isinstance(maybe_earnings, list) and maybe_earnings:
             return _normalize_earnings_items(maybe_earnings)
 
-    allow_live_fallback = os.getenv("CALENDAR_ALLOW_LIVE_EARNINGS_FALLBACK", "false").strip().lower() in {"1", "true", "yes", "on"}
+    allow_live_fallback = os.getenv("CALENDAR_ALLOW_LIVE_EARNINGS_FALLBACK", "true").strip().lower() in {"1", "true", "yes", "on"}
     if not allow_live_fallback:
         if _earnings_last_success:
             print("[calendar] using last_success earnings snapshot (live fallback disabled)")
@@ -1066,6 +1066,35 @@ def _load_calendar_filter_config() -> dict[str, Any]:
         merged = {**defaults, **payload}
         return merged
     return defaults
+
+
+def _calendar_sort_key(item: dict[str, Any]) -> tuple[str, int, str]:
+    item_kind = str(item.get("kind") or "").strip().lower()
+    kind_rank = 0 if item_kind == "earnings" else 1
+    return (
+        str(item.get("event_date") or "9999-99-99"),
+        kind_rank,
+        str(item.get("ticker") or item.get("event") or ""),
+    )
+
+
+def _cap_calendar_items(
+    items: list[dict[str, Any]],
+    *,
+    desired_total: int,
+    earnings_cap: int,
+) -> list[dict[str, Any]]:
+    if desired_total <= 0:
+        return items
+
+    earnings_items = [item for item in items if str(item.get("kind") or "").lower() == "earnings"]
+    other_items = [item for item in items if str(item.get("kind") or "").lower() != "earnings"]
+
+    selected_earnings = earnings_items[: max(0, min(earnings_cap, desired_total))]
+    remaining = max(0, desired_total - len(selected_earnings))
+    capped = selected_earnings + other_items[:remaining]
+    capped.sort(key=_calendar_sort_key)
+    return capped
 
 
 def _parse_csv_values(value: Optional[str]) -> set[str]:
