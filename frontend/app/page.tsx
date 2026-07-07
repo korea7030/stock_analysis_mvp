@@ -84,6 +84,21 @@ function formatChartValue(v: number): string {
   return v.toFixed(1);
 }
 
+function formatRetryAfter(seconds: number | undefined): string {
+  if (!seconds || seconds <= 0) return "";
+  if (seconds >= 3600) return ` 약 ${Math.ceil(seconds / 3600)}시간 후 다시 시도해 주세요.`;
+  if (seconds >= 60) return ` 약 ${Math.ceil(seconds / 60)}분 후 다시 시도해 주세요.`;
+  return ` 약 ${seconds}초 후 다시 시도해 주세요.`;
+}
+
+function apiErrorMessage(
+  fallback: string,
+  payload?: { message?: string; details?: { retry_after_s?: number }; retry_after_s?: number },
+): string {
+  const retryAfter = payload?.retry_after_s ?? payload?.details?.retry_after_s;
+  return `${payload?.message ?? fallback}${formatRetryAfter(retryAfter)}`;
+}
+
 function Pager(props: {
   page: number;
   totalItems: number;
@@ -395,7 +410,7 @@ export default function Dashboard() {
     const es = new EventSource(url);
 
     es.onmessage = (e) => {
-      let parsed: { type: string; message?: string; code?: string; status?: number; data?: AnalyzeResponse };
+      let parsed: { type: string; message?: string; code?: string; status?: number; retry_after_s?: number; data?: AnalyzeResponse };
       try {
         parsed = JSON.parse(e.data) as typeof parsed;
       } catch {
@@ -422,7 +437,7 @@ export default function Dashboard() {
       } else if (parsed.type === "error") {
         es.close();
         setErrorCode(parsed.code ?? null);
-        setError(parsed.message ?? "요청에 실패했습니다");
+        setError(apiErrorMessage("요청에 실패했습니다", parsed));
         setLoading(false);
       }
     };
@@ -453,7 +468,7 @@ export default function Dashboard() {
       .finally(() => setHistoryLoading(false));
     setAiSummary(null);
     setAiSummaryError(null);
-  }, [data]);
+  }, [data, apiBaseUrl, form, ticker]);
 
   const formatPct = (value: number | null | undefined) => {
     if (value == null) return "N/A";
@@ -472,8 +487,8 @@ export default function Dashboard() {
     try {
       const res = await fetch(`${baseUrl}/analyze/summary?ticker=${encodeURIComponent(resolvedTicker)}&form=${encodeURIComponent(resolvedForm)}`);
       if (!res.ok) {
-        const err = (await res.json()) as { message?: string };
-        throw new Error(err.message ?? `HTTP ${res.status}`);
+        const err = (await res.json()) as { message?: string; details?: { retry_after_s?: number } };
+        throw new Error(apiErrorMessage(`HTTP ${res.status}`, err));
       }
       setAiSummary((await res.json()) as AiSummaryResponse);
     } catch (e) {
@@ -493,8 +508,8 @@ export default function Dashboard() {
     try {
       const res = await fetch(`${baseUrl}/analyze?ticker=${encodeURIComponent(ct)}&form=${encodeURIComponent(form)}`);
       if (!res.ok) {
-        const err = (await res.json()) as { message?: string };
-        throw new Error(err.message ?? `HTTP ${res.status}`);
+        const err = (await res.json()) as { message?: string; details?: { retry_after_s?: number } };
+        throw new Error(apiErrorMessage(`HTTP ${res.status}`, err));
       }
       setCompareData((await res.json()) as AnalyzeResponse);
     } catch (e) {
@@ -792,6 +807,9 @@ export default function Dashboard() {
                       최근 갱신: {formatLastUpdated(data.last_updated)}
                     </span>
                   </div>
+                  <p className="mt-3 text-xs leading-relaxed text-slate-400">
+                    SEC 원문 공시에서 자동 추출한 데이터입니다. 표 구조에 따라 일부 항목이 누락되거나 다르게 분류될 수 있으며 투자 조언으로 제공되지 않습니다.
+                  </p>
                 </div>
 
 
@@ -951,12 +969,15 @@ export default function Dashboard() {
 
                     {activeTab === "trend" && (
                       <div>
+                        <p className="text-xs text-slate-400 mb-3">
+                          트렌드는 이 서비스에 저장된 동일 티커/보고서 조회 이력을 기준으로 표시됩니다. 전체 과거 공시를 자동으로 소급 분석한 결과가 아닙니다.
+                        </p>
                         {historyLoading && (
                           <p className="text-sm text-slate-500 py-8 text-center">히스토리 로딩 중...</p>
                         )}
                         {!historyLoading && (!historyData || historyData.history.length <= 1) && (
                           <p className="text-sm text-slate-400 py-8 text-center">
-                            히스토리 데이터 부족 — 분석을 여러 번 실행하면 쌓입니다
+                            저장된 이력이 부족합니다. 같은 보고서 유형의 분석 결과가 쌓이면 표시됩니다.
                           </p>
                         )}
                         {!historyLoading && historyData && historyData.history.length > 1 && (() => {

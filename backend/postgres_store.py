@@ -66,6 +66,22 @@ def _ensure_tables(conn: psycopg.Connection) -> None:
               ON metric_history (ticker, form, period_end DESC);
             """
         )
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS response_cache (
+              cache_key TEXT PRIMARY KEY,
+              payload JSONB NOT NULL,
+              expires_at TIMESTAMPTZ NOT NULL,
+              updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            );
+            """
+        )
+        cur.execute(
+            """
+            CREATE INDEX IF NOT EXISTS response_cache_expires_at_idx
+              ON response_cache (expires_at);
+            """
+        )
     conn.commit()
 
 
@@ -245,6 +261,95 @@ def load_metric_history(
     except Exception as e:
         print("[Postgres ERROR] load_metric_history:", e)
         return []
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+# ---------------------------------------------------------------------------
+# response_cache (shared API cache)
+# ---------------------------------------------------------------------------
+
+def save_response_cache(
+    *,
+    cache_key: str,
+    payload: Any,
+    ttl_s: int,
+) -> None:
+    conn = _connect()
+    if conn is None:
+        return
+    try:
+        _ensure_tables(conn)
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO response_cache (cache_key, payload, expires_at)
+                VALUES (%s, %s, now() + (%s * interval '1 second'))
+                ON CONFLICT (cache_key) DO UPDATE SET
+                  payload = EXCLUDED.payload,
+                  expires_at = EXCLUDED.expires_at,
+                  updated_at = now();
+                """,
+                (cache_key, json.dumps(payload), max(0, int(ttl_s))),
+            )
+        conn.commit()
+    except Exception as e:
+        print("[Postgres ERROR] save_response_cache:", e)
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+def load_response_cache(*, cache_key: str) -> Any | None:
+    conn = _connect()
+    if conn is None:
+        return None
+    try:
+        _ensure_tables(conn)
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT payload
+                FROM response_cache
+                WHERE cache_key = %s
+                  AND expires_at > now()
+                """,
+                (cache_key,),
+            )
+            row = cur.fetchone()
+            if not row:
+                return None
+            payload_raw = row[0]
+            return payload_raw if isinstance(payload_raw, (dict, list)) else json.loads(payload_raw or "null")
+    except Exception as e:
+        print("[Postgres ERROR] load_response_cache:", e)
+        return None
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+def purge_expired_response_cache() -> int:
+    conn = _connect()
+    if conn is None:
+        return 0
+    try:
+        _ensure_tables(conn)
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM response_cache WHERE expires_at <= now();")
+            deleted = cur.rowcount or 0
+        conn.commit()
+        return deleted
+    except Exception as e:
+        print("[Postgres ERROR] purge_expired_response_cache:", e)
+        return 0
     finally:
         try:
             conn.close()

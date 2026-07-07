@@ -19,6 +19,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - 테스트: `pytest backend/tests` — `conftest.py` 가 `sys.path` 에 저장소 루트를 주입하여 `backend.*` import 를 해결함.
 - 단일 테스트: `pytest backend/tests/test_analyzer.py::test_schema_shape -v`
 - 실 엔드포인트 검증 (127.0.0.1:8000 으로 uvicorn 띄우고 SEC 포함 실 호출): `python backend/scripts/verify_contract.py`
+- 인기 티커 캐시 예열: `python backend/scripts/prewarm_cache.py`
+  (`PREWARM_TICKERS`, `PREWARM_FORMS`, `PREWARM_SLEEP_S` 로 대상/간격 조정. `DATABASE_URL` 이 있으면 `response_cache` 에 저장됨.)
 - 도커: `docker build -f backend/Dockerfile -t stock-analyzer-backend .` 후 `-p 8000:8000` 로 실행.
 
 ### 프론트엔드 (`frontend/` 디렉토리에서 실행)
@@ -37,7 +39,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `EARNINGS_CACHE_TTL_S` (기본 21600), `ANALYZE_CACHE_TTL_S` (기본 43200), `EARNINGS_EMPTY_TTL_S` / `EARNINGS_ERROR_TTL_S` (기본 300) — 인-프로세스 캐시 TTL.
 - `SEC_RPS` / `MARKETBEAT_RPS` / `NASDAQ_RPS` — `pyrate-limiter` 기반 소스별 레이트 리밋.
 - `SEC_CALL_TIMEOUT_S` (기본 90), `SEC_MAX_FILINGS` (기본 5).
+- `RATE_LIMIT_ENABLED` (기본 true) — 공개 API 인메모리 레이트 리밋 활성화 여부.
+- `ANALYZE_IP_LIMIT` / `ANALYZE_IP_WINDOW_S` (기본 20/3600), `ANALYZE_TICKER_LIMIT` / `ANALYZE_TICKER_WINDOW_S` (기본 8/900) — `/analyze`, `/analyze/stream` 비용성 SEC 분석 제한.
+- `SUMMARY_IP_LIMIT` / `SUMMARY_IP_WINDOW_S` (기본 10/86400), `SUMMARY_TICKER_LIMIT` / `SUMMARY_TICKER_WINDOW_S` (기본 3/86400) — `/analyze/summary` OpenAI 호출 제한.
+- `CALENDAR_IP_LIMIT` / `CALENDAR_IP_WINDOW_S` (기본 120/600) — 캘린더/히스토리 조회 제한.
 - `DATABASE_URL` / `POSTGRES_DSN` / `POSTGRES_URL` — `section_history` 용 선택적 Postgres 연결. 미설정 시 동작 안 함 (`postgres_store.py` 가 연결 오류를 무시함).
+- `DATABASE_URL` / `POSTGRES_DSN` / `POSTGRES_URL` 설정 시 `response_cache` 도 활성화됨. `/analyze`, `/analyze/summary`, `/calendar`, `/earnings` 결과를 Postgres에 TTL 기반으로 저장해 인스턴스 재시작/스케일아웃 후 외부 API 재호출을 줄임.
+- `PREWARM_TICKERS` (기본 대형주 목록), `PREWARM_FORMS` (기본 `10-Q`), `PREWARM_SLEEP_S` (기본 1.0) — `backend/scripts/prewarm_cache.py` 캐시 예열 대상.
 - `MONGODB_URI` / `MONGODB_DB` / `MONGODB_COLLECTION` — 레거시 `main.py` 저장 경로에서만 사용.
 
 프론트엔드: `NEXT_PUBLIC_API_BASE_URL`.

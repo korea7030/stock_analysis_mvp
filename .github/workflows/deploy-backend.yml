@@ -13,6 +13,7 @@ env:
   REGION: us-central1
   ARTIFACT_REGISTRY: us-central1-docker.pkg.dev
   IMAGE_NAME: docker-repo/stock-analyzer-backend
+  DEFAULT_ALLOWED_ORIGINS: http://localhost:3000,http://127.0.0.1:3000
 
 jobs:
   deploy:
@@ -73,13 +74,37 @@ jobs:
           docker push ${{ env.ARTIFACT_REGISTRY }}/${{ env.PROJECT_ID }}/${{ env.IMAGE_NAME }}:latest
 
       - name: Deploy to Cloud Run
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ALLOWED_ORIGINS: ${{ vars.ALLOWED_ORIGINS || env.DEFAULT_ALLOWED_ORIGINS }}
+          RATE_LIMIT_ENABLED: ${{ vars.RATE_LIMIT_ENABLED || 'true' }}
+          ANALYZE_IP_LIMIT: ${{ vars.ANALYZE_IP_LIMIT || '20' }}
+          ANALYZE_IP_WINDOW_S: ${{ vars.ANALYZE_IP_WINDOW_S || '3600' }}
+          ANALYZE_TICKER_LIMIT: ${{ vars.ANALYZE_TICKER_LIMIT || '8' }}
+          ANALYZE_TICKER_WINDOW_S: ${{ vars.ANALYZE_TICKER_WINDOW_S || '900' }}
+          SUMMARY_IP_LIMIT: ${{ vars.SUMMARY_IP_LIMIT || '10' }}
+          SUMMARY_IP_WINDOW_S: ${{ vars.SUMMARY_IP_WINDOW_S || '86400' }}
+          SUMMARY_TICKER_LIMIT: ${{ vars.SUMMARY_TICKER_LIMIT || '3' }}
+          SUMMARY_TICKER_WINDOW_S: ${{ vars.SUMMARY_TICKER_WINDOW_S || '86400' }}
+          CALENDAR_IP_LIMIT: ${{ vars.CALENDAR_IP_LIMIT || '120' }}
+          CALENDAR_IP_WINDOW_S: ${{ vars.CALENDAR_IP_WINDOW_S || '600' }}
         run: |
+          ENV_VARS="^|^ALLOWED_ORIGINS=${ALLOWED_ORIGINS}|RATE_LIMIT_ENABLED=${RATE_LIMIT_ENABLED}|ANALYZE_IP_LIMIT=${ANALYZE_IP_LIMIT}|ANALYZE_IP_WINDOW_S=${ANALYZE_IP_WINDOW_S}|ANALYZE_TICKER_LIMIT=${ANALYZE_TICKER_LIMIT}|ANALYZE_TICKER_WINDOW_S=${ANALYZE_TICKER_WINDOW_S}|SUMMARY_IP_LIMIT=${SUMMARY_IP_LIMIT}|SUMMARY_IP_WINDOW_S=${SUMMARY_IP_WINDOW_S}|SUMMARY_TICKER_LIMIT=${SUMMARY_TICKER_LIMIT}|SUMMARY_TICKER_WINDOW_S=${SUMMARY_TICKER_WINDOW_S}|CALENDAR_IP_LIMIT=${CALENDAR_IP_LIMIT}|CALENDAR_IP_WINDOW_S=${CALENDAR_IP_WINDOW_S}"
+          if [ -n "$DATABASE_URL" ]; then
+            ENV_VARS="${ENV_VARS}|DATABASE_URL=${DATABASE_URL}"
+          fi
+          if [ -n "$OPENAI_API_KEY" ]; then
+            ENV_VARS="${ENV_VARS}|OPENAI_API_KEY=${OPENAI_API_KEY}"
+          fi
+
           gcloud run deploy stock-backend-api \
             --image=${{ env.ARTIFACT_REGISTRY }}/${{ env.PROJECT_ID }}/${{ env.IMAGE_NAME }}:${{ github.sha }} \
             --region=${{ env.REGION }} \
             --platform=managed \
             --allow-unauthenticated \
             --port=8080 \
+            --set-env-vars="${ENV_VARS}" \
             --project=${{ env.PROJECT_ID }}
 
       - name: Output service URL

@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
@@ -16,6 +16,7 @@ import uvicorn
 from backend.analyzer import run_analysis
 from backend.clients import get_logical_today
 from backend.cache import TTLCache
+from backend.rate_limiter import SlidingWindowRateLimiter
 from backend.models import (
     AnalyzeMeta,
     AnalyzeMetrics,
@@ -28,7 +29,12 @@ from backend.models import (
     MetricHistoryEntry,
     MetricHistoryResponse,
 )
-from backend.postgres_store import save_metric_history, load_metric_history
+from backend.postgres_store import (
+    load_metric_history,
+    load_response_cache,
+    save_metric_history,
+    save_response_cache,
+)
 
 try:
     from backend.analyzer import get_marketbeat_earnings
@@ -51,6 +57,19 @@ _earnings_cache: TTLCache[list[dict[str, Any]]] = TTLCache()
 _earnings_last_success: list[dict[str, Any]] | None = None
 _calendar_cache: TTLCache[list[dict[str, Any]]] = TTLCache()
 _analyze_cache: TTLCache[dict[str, Any]] = TTLCache()
+_rate_limiter = SlidingWindowRateLimiter()
+
+RATE_LIMIT_ENABLED = os.getenv("RATE_LIMIT_ENABLED", "true").lower() not in {"0", "false", "no"}
+ANALYZE_IP_LIMIT = int(os.getenv("ANALYZE_IP_LIMIT", "20"))
+ANALYZE_IP_WINDOW_S = int(os.getenv("ANALYZE_IP_WINDOW_S", "3600"))
+ANALYZE_TICKER_LIMIT = int(os.getenv("ANALYZE_TICKER_LIMIT", "8"))
+ANALYZE_TICKER_WINDOW_S = int(os.getenv("ANALYZE_TICKER_WINDOW_S", "900"))
+SUMMARY_IP_LIMIT = int(os.getenv("SUMMARY_IP_LIMIT", "10"))
+SUMMARY_IP_WINDOW_S = int(os.getenv("SUMMARY_IP_WINDOW_S", "86400"))
+SUMMARY_TICKER_LIMIT = int(os.getenv("SUMMARY_TICKER_LIMIT", "3"))
+SUMMARY_TICKER_WINDOW_S = int(os.getenv("SUMMARY_TICKER_WINDOW_S", "86400"))
+CALENDAR_IP_LIMIT = int(os.getenv("CALENDAR_IP_LIMIT", "120"))
+CALENDAR_IP_WINDOW_S = int(os.getenv("CALENDAR_IP_WINDOW_S", "600"))
 
 raw_origins = os.getenv("ALLOWED_ORIGINS", "")
 origins = [o.strip() for o in raw_origins.split(",") if o.strip()]
@@ -79,6 +98,7 @@ app.add_middleware(
     responses={404: {"model": ApiError}, 422: {"model": ApiError}, 500: {"model": ApiError}},
 )
 async def analyze(
+    request: Request,
     ticker: str = Query(...),
     form: str = Query("10-Q"),
 ):
@@ -96,8 +116,16 @@ async def analyze(
             message=str(validation_error),
         )
 
+    rate_limit_response = _check_analyze_rate_limit(
+        request,
+        ticker=normalized_ticker,
+        form=normalized_form,
+    )
+    if rate_limit_response is not None:
+        return rate_limit_response
+
     cache_key = f"analyze:{normalized_ticker}:{normalized_form}"
-    cached_payload = _analyze_cache.get(cache_key)
+    cached_payload = _load_analyze_cache(cache_key)
     if cached_payload is not None:
         cached_last_updated = _last_updated_if_today(cached_payload.get("last_updated"))
         if cached_last_updated is None:
@@ -127,7 +155,7 @@ async def analyze(
                 message="해당 보고서에는 재무제표/지표 데이터가 없습니다. 다른 보고서를 선택해 주세요.",
             )
 
-        _analyze_cache.set(cache_key, response_payload, ANALYZE_CACHE_TTL_S)
+        _save_analyze_cache(cache_key, response_payload)
         _save_metrics_to_history(normalized_ticker, normalized_form, schema)
         return response_payload
 
@@ -162,10 +190,21 @@ async def analyze(
     responses={422: {"model": ApiError}},
 )
 async def analyze_history(
+    request: Request,
     ticker: str = Query(...),
     form: str = Query("10-Q"),
     limit: int = Query(8, ge=1, le=20),
 ):
+    rate_limit_response = _check_rate_limit(
+        request,
+        bucket="history",
+        limit=CALENDAR_IP_LIMIT,
+        window_s=CALENDAR_IP_WINDOW_S,
+        message="조회 요청이 많습니다. 잠시 후 다시 시도해 주세요.",
+    )
+    if rate_limit_response is not None:
+        return rate_limit_response
+
     try:
         normalized_ticker = _normalize_ticker(ticker)
         normalized_form = _normalize_form(form)
@@ -202,6 +241,7 @@ SUMMARY_CACHE_TTL_S = int(os.getenv("SUMMARY_CACHE_TTL_S", "86400"))
     responses={422: {"model": ApiError}, 500: {"model": ApiError}},
 )
 async def analyze_summary(
+    request: Request,
     ticker: str = Query(...),
     form: str = Query("10-Q"),
 ):
@@ -211,12 +251,31 @@ async def analyze_summary(
     except ValueError as validation_error:
         return _error_response(status_code=422, code="validation_error", message=str(validation_error))
 
+    rate_limit_response = _check_summary_rate_limit(
+        request,
+        ticker=normalized_ticker,
+        form=normalized_form,
+    )
+    if rate_limit_response is not None:
+        return rate_limit_response
+
     cache_key = f"summary:{normalized_ticker}:{normalized_form}"
     cached = _summary_cache.get(cache_key)
     if cached is not None:
         return AiSummaryResponse(ticker=normalized_ticker, form=normalized_form, summary=cached)
+    cached_summary_payload = load_response_cache(cache_key=cache_key)
+    if cached_summary_payload is not None:
+        summary = str(cached_summary_payload.get("summary") or "")
+        if summary:
+            _summary_cache.set(cache_key, summary, SUMMARY_CACHE_TTL_S)
+            return AiSummaryResponse(
+                ticker=normalized_ticker,
+                form=normalized_form,
+                period_end=cached_summary_payload.get("period_end"),
+                summary=summary,
+            )
 
-    analyze_cached = _analyze_cache.get(f"analyze:{normalized_ticker}:{normalized_form}")
+    analyze_cached = _load_analyze_cache(f"analyze:{normalized_ticker}:{normalized_form}")
     if analyze_cached is None:
         return _error_response(
             status_code=422,
@@ -236,6 +295,11 @@ async def analyze_summary(
         )
         _summary_cache.set(cache_key, summary, SUMMARY_CACHE_TTL_S)
         period_end = meta.get("period_end")
+        save_response_cache(
+            cache_key=cache_key,
+            payload={"summary": summary, "period_end": period_end},
+            ttl_s=SUMMARY_CACHE_TTL_S,
+        )
         return AiSummaryResponse(
             ticker=normalized_ticker,
             form=normalized_form,
@@ -248,6 +312,7 @@ async def analyze_summary(
 
 @app.get("/analyze/stream")
 async def analyze_stream(
+    request: Request,
     ticker: str = Query(...),
     form: str = Query("10-Q"),
 ):
@@ -260,8 +325,22 @@ async def analyze_stream(
             yield f"data: {payload}\n\n"
         return StreamingResponse(_validation_err(), media_type="text/event-stream")
 
+    rate_limit_error = _check_analyze_rate_limit_payload(
+        request,
+        ticker=normalized_ticker,
+        form=normalized_form,
+    )
+    if rate_limit_error is not None:
+        async def _rate_limited():
+            yield f"data: {json.dumps(rate_limit_error)}\n\n"
+        return StreamingResponse(
+            _rate_limited(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
+
     cache_key = f"analyze:{normalized_ticker}:{normalized_form}"
-    cached_payload = _analyze_cache.get(cache_key)
+    cached_payload = _load_analyze_cache(cache_key)
     if cached_payload is not None:
         cached_last_updated = _last_updated_if_today(cached_payload.get("last_updated"))
         if cached_last_updated is None:
@@ -327,7 +406,7 @@ async def analyze_stream(
                     yield f"data: {json.dumps({'type': 'error', 'code': 'no_financial_data', 'status': 422, 'message': '해당 보고서에는 재무제표/지표 데이터가 없습니다. 다른 보고서를 선택해 주세요.'})}\n\n"
                     break
 
-                _analyze_cache.set(cache_key, response_payload, ANALYZE_CACHE_TTL_S)
+                _save_analyze_cache(cache_key, response_payload)
                 _save_metrics_to_history(normalized_ticker, normalized_form, schema)
                 yield f"data: {json.dumps({'type': 'result', 'data': response_payload})}\n\n"
                 break
@@ -357,13 +436,29 @@ async def health():
     response_model_exclude_none=True,
     responses={500: {"model": ApiError}},
 )
-def earnings():
+def earnings(request: Request):
     global _earnings_last_success
+    rate_limit_response = _check_rate_limit(
+        request,
+        bucket="earnings",
+        limit=CALENDAR_IP_LIMIT,
+        window_s=CALENDAR_IP_WINDOW_S,
+        message="실적 조회 요청이 많습니다. 잠시 후 다시 시도해 주세요.",
+    )
+    if rate_limit_response is not None:
+        return rate_limit_response
+
     cache_key = "earnings"
     cached_payload = _earnings_cache.get(cache_key)
     if cached_payload is not None:
         print(f"[cache] kind=earnings cache_hit=true key={cache_key}")
         return cached_payload
+    persistent_payload = load_response_cache(cache_key=cache_key)
+    if isinstance(persistent_payload, list):
+        _earnings_cache.set(cache_key, persistent_payload, EARNINGS_CACHE_TTL_S)
+        _earnings_last_success = persistent_payload
+        print(f"[cache] kind=earnings persistent_hit=true key={cache_key}")
+        return persistent_payload
 
     print(f"[cache] kind=earnings cache_hit=false key={cache_key}")
     
@@ -384,6 +479,7 @@ def earnings():
             return payload
 
         _earnings_cache.set(cache_key, payload, EARNINGS_CACHE_TTL_S)
+        save_response_cache(cache_key=cache_key, payload=payload, ttl_s=EARNINGS_CACHE_TTL_S)
         _earnings_last_success = payload
         return payload
     except Exception as e:
@@ -401,6 +497,7 @@ def earnings():
 
 @app.get("/calendar", response_model=list[dict[str, Any]])
 def calendar(
+    request: Request,
     weeks: int = Query(1, ge=1, le=4),
     kind: Optional[str] = Query(None, description="earnings,economic"),
     status: Optional[str] = Query(None),
@@ -408,10 +505,24 @@ def calendar(
     importance: Optional[str] = Query(None),
     ticker: Optional[str] = Query(None),
 ):
+    rate_limit_response = _check_rate_limit(
+        request,
+        bucket="calendar",
+        limit=CALENDAR_IP_LIMIT,
+        window_s=CALENDAR_IP_WINDOW_S,
+        message="캘린더 조회 요청이 많습니다. 잠시 후 다시 시도해 주세요.",
+    )
+    if rate_limit_response is not None:
+        return rate_limit_response
+
     cache_key = f"calendar:w{weeks}:k={kind or ''}:s={status or ''}:c={country or ''}:i={importance or ''}:t={ticker or ''}"
     cached_payload = _calendar_cache.get(cache_key)
     if cached_payload is not None:
         return cached_payload
+    persistent_payload = load_response_cache(cache_key=cache_key)
+    if isinstance(persistent_payload, list):
+        _calendar_cache.set(cache_key, persistent_payload, EARNINGS_CACHE_TTL_S)
+        return persistent_payload
 
     today = get_logical_today()
     start_date = today - timedelta(days=today.weekday())
@@ -443,6 +554,7 @@ def calendar(
         filtered = filtered[:desired_total]
 
     _calendar_cache.set(cache_key, filtered, EARNINGS_CACHE_TTL_S)
+    save_response_cache(cache_key=cache_key, payload=filtered, ttl_s=EARNINGS_CACHE_TTL_S)
     return filtered
 
 
@@ -451,14 +563,221 @@ if __name__ == "__main__":
     uvicorn.run("api:app", host="0.0.0.0", port=port, reload=True)
 
 
-def _error_response(status_code: int, code: str, message: str, details: Optional[Any] = None) -> JSONResponse:
+def _client_ip(request: Request) -> str:
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        return forwarded.split(",")[0].strip() or "unknown"
+    real_ip = request.headers.get("x-real-ip")
+    if real_ip:
+        return real_ip.strip()
+    if request.client and request.client.host:
+        return request.client.host
+    return "unknown"
+
+
+def _check_rate_limit_payload(
+    request: Request,
+    *,
+    bucket: str,
+    limit: int,
+    window_s: int,
+    message: str,
+) -> dict[str, Any] | None:
+    if not RATE_LIMIT_ENABLED:
+        return None
+
+    ip = _client_ip(request)
+    result = _rate_limiter.allow(
+        f"{bucket}:ip:{ip}",
+        limit=limit,
+        window_s=window_s,
+    )
+    if result.allowed:
+        return None
+
+    return {
+        "type": "error",
+        "code": "rate_limited",
+        "status": 429,
+        "message": message,
+        "retry_after_s": result.retry_after_s,
+    }
+
+
+def _check_rate_limit(
+    request: Request,
+    *,
+    bucket: str,
+    limit: int,
+    window_s: int,
+    message: str,
+) -> JSONResponse | None:
+    payload = _check_rate_limit_payload(
+        request,
+        bucket=bucket,
+        limit=limit,
+        window_s=window_s,
+        message=message,
+    )
+    if payload is None:
+        return None
+    headers = {"Retry-After": str(payload.get("retry_after_s", 1))}
+    return _error_response(
+        status_code=429,
+        code="rate_limited",
+        message=message,
+        details={"retry_after_s": payload.get("retry_after_s", 1)},
+        headers=headers,
+    )
+
+
+def _check_ticker_rate_limit_payload(
+    *,
+    bucket: str,
+    ticker: str,
+    form: str,
+    limit: int,
+    window_s: int,
+    message: str,
+) -> dict[str, Any] | None:
+    if not RATE_LIMIT_ENABLED:
+        return None
+
+    result = _rate_limiter.allow(
+        f"{bucket}:ticker:{ticker}:{form}",
+        limit=limit,
+        window_s=window_s,
+    )
+    if result.allowed:
+        return None
+
+    return {
+        "type": "error",
+        "code": "rate_limited",
+        "status": 429,
+        "message": message,
+        "retry_after_s": result.retry_after_s,
+    }
+
+
+def _check_analyze_rate_limit_payload(
+    request: Request,
+    *,
+    ticker: str,
+    form: str,
+) -> dict[str, Any] | None:
+    ip_payload = _check_rate_limit_payload(
+        request,
+        bucket="analyze",
+        limit=ANALYZE_IP_LIMIT,
+        window_s=ANALYZE_IP_WINDOW_S,
+        message="분석 요청이 많습니다. 잠시 후 다시 시도해 주세요.",
+    )
+    if ip_payload is not None:
+        return ip_payload
+
+    return _check_ticker_rate_limit_payload(
+        bucket="analyze",
+        ticker=ticker,
+        form=form,
+        limit=ANALYZE_TICKER_LIMIT,
+        window_s=ANALYZE_TICKER_WINDOW_S,
+        message="같은 종목 분석 요청이 많습니다. 잠시 후 다시 시도해 주세요.",
+    )
+
+
+def _check_analyze_rate_limit(
+    request: Request,
+    *,
+    ticker: str,
+    form: str,
+) -> JSONResponse | None:
+    payload = _check_analyze_rate_limit_payload(request, ticker=ticker, form=form)
+    if payload is None:
+        return None
+    headers = {"Retry-After": str(payload.get("retry_after_s", 1))}
+    return _error_response(
+        status_code=429,
+        code="rate_limited",
+        message=str(payload["message"]),
+        details={"retry_after_s": payload.get("retry_after_s", 1)},
+        headers=headers,
+    )
+
+
+def _check_summary_rate_limit(
+    request: Request,
+    *,
+    ticker: str,
+    form: str,
+) -> JSONResponse | None:
+    ip_payload = _check_rate_limit_payload(
+        request,
+        bucket="summary",
+        limit=SUMMARY_IP_LIMIT,
+        window_s=SUMMARY_IP_WINDOW_S,
+        message="AI 요약 요청 한도를 초과했습니다. 나중에 다시 시도해 주세요.",
+    )
+    if ip_payload is not None:
+        payload = ip_payload
+    else:
+        payload = _check_ticker_rate_limit_payload(
+            bucket="summary",
+            ticker=ticker,
+            form=form,
+            limit=SUMMARY_TICKER_LIMIT,
+            window_s=SUMMARY_TICKER_WINDOW_S,
+            message="같은 종목의 AI 요약 요청 한도를 초과했습니다. 나중에 다시 시도해 주세요.",
+        )
+    if payload is None:
+        return None
+    headers = {"Retry-After": str(payload.get("retry_after_s", 1))}
+    return _error_response(
+        status_code=429,
+        code="rate_limited",
+        message=str(payload["message"]),
+        details={"retry_after_s": payload.get("retry_after_s", 1)},
+        headers=headers,
+    )
+
+
+def _load_analyze_cache(cache_key: str) -> dict[str, Any] | None:
+    cached_payload = _analyze_cache.get(cache_key)
+    if cached_payload is not None:
+        return cached_payload
+
+    cached_payload = load_response_cache(cache_key=cache_key)
+    if cached_payload is None:
+        return None
+
+    _analyze_cache.set(cache_key, cached_payload, ANALYZE_CACHE_TTL_S)
+    print(f"[cache] kind=analyze persistent_hit=true key={cache_key}")
+    return cached_payload
+
+
+def _save_analyze_cache(cache_key: str, payload: dict[str, Any]) -> None:
+    _analyze_cache.set(cache_key, payload, ANALYZE_CACHE_TTL_S)
+    save_response_cache(
+        cache_key=cache_key,
+        payload=payload,
+        ttl_s=ANALYZE_CACHE_TTL_S,
+    )
+
+
+def _error_response(
+    status_code: int,
+    code: str,
+    message: str,
+    details: Optional[Any] = None,
+    headers: Optional[dict[str, str]] = None,
+) -> JSONResponse:
     payload: dict[str, Any] = {
         "code": code,
         "message": message,
     }
     if details is not None:
         payload["details"] = details
-    return JSONResponse(status_code=status_code, content=payload)
+    return JSONResponse(status_code=status_code, content=payload, headers=headers)
 
 
 def _normalize_ticker(ticker: str) -> str:
