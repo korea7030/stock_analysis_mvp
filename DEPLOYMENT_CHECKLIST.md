@@ -31,7 +31,7 @@ Set these GitHub Actions secrets:
 
 Set these GitHub Actions variables:
 
-- `ALLOWED_ORIGINS` — comma-separated frontend origins, for example `https://finnblog.pe.kr,https://www.finnblog.pe.kr` if both hostnames are enabled.
+- `ALLOWED_ORIGINS` — comma-separated frontend origins. Default deployment value is `https://finnblog.pe.kr,https://www.finnblog.pe.kr,https://stock-analysis-mvp.pages.dev`; set this explicitly if the production domain changes.
 - `RATE_LIMIT_ENABLED` — default `true`.
 - `ANALYZE_IP_LIMIT` / `ANALYZE_IP_WINDOW_S` — default `20` / `3600`.
 - `ANALYZE_TICKER_LIMIT` / `ANALYZE_TICKER_WINDOW_S` — default `8` / `900`.
