@@ -29,6 +29,13 @@ export default function RootLayout({
 }) {
   return (
     <html lang="ko">
+      <head>
+        <script
+          async
+          src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9705526044129947"
+          crossOrigin="anonymous"
+        />
+      </head>
       <body>
         {children}
         <footer className="border-t border-slate-200 bg-white">
