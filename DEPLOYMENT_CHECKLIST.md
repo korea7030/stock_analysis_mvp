@@ -26,7 +26,7 @@ Set these GitHub Actions secrets:
 
 - `WIF_PROVIDER`
 - `SERVICE_ACCOUNT_EMAIL`
-- `DATABASE_URL` — required for persistent response cache and scheduled prewarm jobs.
+- `DATABASE_URL` — optional for the backend, but required if persistent `response_cache` and scheduled prewarm jobs should run.
 - `OPENAI_API_KEY` — required only if AI summaries should be enabled.
 
 Set these GitHub Actions variables:
