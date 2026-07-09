@@ -42,6 +42,8 @@ Set these GitHub Actions variables:
 - `PREWARM_FORMS` — optional comma-separated forms, default `10-Q`.
 - `PREWARM_SLEEP_S` — optional delay between prewarm calls, default `1.5`.
 
+For Supabase, run `supabase/enable_rls.sql` once in the SQL Editor after the cache/history tables have been created. The backend also enables RLS automatically during table initialization.
+
 After backend deployment, verify:
 
 - `GET /health`

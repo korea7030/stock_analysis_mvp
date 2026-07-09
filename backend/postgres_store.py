@@ -82,6 +82,9 @@ def _ensure_tables(conn: psycopg.Connection) -> None:
               ON response_cache (expires_at);
             """
         )
+        cur.execute("ALTER TABLE section_history ENABLE ROW LEVEL SECURITY;")
+        cur.execute("ALTER TABLE metric_history ENABLE ROW LEVEL SECURITY;")
+        cur.execute("ALTER TABLE response_cache ENABLE ROW LEVEL SECURITY;")
     conn.commit()
 
 
