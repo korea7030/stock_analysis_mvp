@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import DOMPurify from "dompurify";
 import {
   BarChart,
@@ -17,6 +18,7 @@ import {
 
 import type { AiSummaryResponse, AnalyzeResponse, CalendarItem, FilingForm, MetricValue, MetricHistoryResponse } from "@/lib/apiTypes";
 import { annotateTableHTML } from "@/lib/filingTables";
+import { stockPath, stockProfiles } from "./siteConfig";
 
 const EARNINGS_PAGE_SIZE = 8;
 const FILING_FORMS: readonly FilingForm[] = ["10-Q", "10-K", "6-K", "8-K", "20-F"];
@@ -29,6 +31,31 @@ const LOADING_STEPS = [
   "최신 보고서 다운로드 중...",
   "재무제표 파싱 중...",
   "메트릭 추출 중...",
+];
+
+const researchTopics = [
+  {
+    title: "SEC 공시 기반 재무제표 확인",
+    body:
+      "10-K, 10-Q, 8-K, 20-F, 6-K 보고서에서 매출, 순이익, 현금흐름처럼 기업 분석에 자주 쓰이는 항목을 한 화면에서 비교합니다. 원문 공시 링크를 함께 제공해 숫자를 직접 확인할 수 있습니다.",
+  },
+  {
+    title: "실적 발표 일정과 결과 추적",
+    body:
+      "이번 주와 다음 주의 주요 실적 발표 일정을 정리하고, 발표 완료 기업은 실제 EPS와 매출을 예상치와 비교할 수 있게 표시합니다. 실적 시즌에 확인해야 할 기업을 빠르게 좁히는 데 초점을 둡니다.",
+  },
+  {
+    title: "투자 판단 전 점검 항목",
+    body:
+      "자동 분석 결과는 투자 조언이 아니라 리서치 보조 자료입니다. 매출 성장, 마진 변화, 현금흐름, 부채, 세그먼트별 실적, 경영진 코멘트를 함께 검토해야 합니다.",
+  },
+];
+
+const filingChecklist = [
+  "최근 분기 매출과 전년 동기 매출의 차이가 일회성 요인인지 확인합니다.",
+  "영업이익률과 순이익률이 동시에 개선되는지, 비용 증가로 훼손되는지 비교합니다.",
+  "영업활동 현금흐름과 잉여현금흐름이 순이익과 같은 방향으로 움직이는지 봅니다.",
+  "부채, 재고, 매출채권, 주식보상비용처럼 손익계산서만으로 보이지 않는 항목을 확인합니다.",
 ];
 
 function isFilingForm(value: string | null | undefined): value is FilingForm {
@@ -586,7 +613,9 @@ export default function Dashboard() {
 
         <div className="rounded-2xl bg-gradient-to-r from-slate-900 to-slate-700 text-white p-5 sm:p-6 shadow">
           <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight">SEC Filing Dashboard</h1>
-          <p className="text-sm text-slate-200 mt-1">Statements and earnings in one place.</p>
+          <p className="text-sm text-slate-200 mt-1">
+            미국 상장사의 SEC 공시, 재무제표 핵심 지표, 실적 발표 일정을 함께 확인하는 리서치 도구입니다.
+          </p>
         </div>
 
 
@@ -1252,6 +1281,85 @@ export default function Dashboard() {
           </div>
 
         </div>
+        <section className="py-4 sm:py-6 space-y-6" aria-labelledby="research-guide-title">
+          <div className="max-w-3xl">
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Research guide</p>
+            <h2 id="research-guide-title" className="mt-2 text-2xl font-semibold tracking-tight text-slate-900">
+              SEC 공시를 읽기 위한 기본 분석 흐름
+            </h2>
+            <p className="mt-3 text-sm leading-6 text-slate-600">
+              SEC Filing Dashboard는 기업이 제출한 공식 보고서와 실적 일정을 바탕으로 투자자가 직접 검토할
+              항목을 정리합니다. 특정 종목의 매수나 매도를 권유하지 않으며, 자동 추출된 수치는 원문 공시와
+              회사 발표 자료를 함께 대조하는 것을 전제로 합니다.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {researchTopics.map((topic) => (
+              <article key={topic.title} className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm">
+                <h3 className="text-base font-semibold text-slate-900">{topic.title}</h3>
+                <p className="mt-2 text-sm leading-6 text-slate-600">{topic.body}</p>
+              </article>
+            ))}
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+            <section className="lg:col-span-5 bg-white rounded-xl border border-slate-200 p-5 shadow-sm" aria-labelledby="filing-checklist-title">
+              <h3 id="filing-checklist-title" className="text-lg font-semibold text-slate-900">
+                공시 분석 체크리스트
+              </h3>
+              <ul className="mt-3 space-y-3 text-sm leading-6 text-slate-600">
+                {filingChecklist.map((item) => (
+                  <li key={item} className="flex gap-2">
+                    <span className="mt-2 h-1.5 w-1.5 rounded-full bg-slate-400 shrink-0" aria-hidden="true" />
+                    <span>{item}</span>
+                  </li>
+                ))}
+              </ul>
+            </section>
+
+            <section className="lg:col-span-7 bg-white rounded-xl border border-slate-200 p-5 shadow-sm" aria-labelledby="stock-research-title">
+              <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-2">
+                <div>
+                  <h3 id="stock-research-title" className="text-lg font-semibold text-slate-900">
+                    종목별 공시 리서치 페이지
+                  </h3>
+                  <p className="mt-1 text-sm text-slate-600">
+                    주요 미국 기업의 공시 관찰 포인트와 분석 도구 바로가기를 제공합니다.
+                  </p>
+                </div>
+                <Link href="/stocks" className="text-sm font-medium text-blue-700 hover:underline">
+                  전체 종목 보기
+                </Link>
+              </div>
+              <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {stockProfiles.slice(0, 6).map((stock) => (
+                  <Link
+                    key={stock.ticker}
+                    href={stockPath(stock.ticker)}
+                    className="block rounded-lg border border-slate-200 p-3 hover:border-blue-300 hover:bg-blue-50/40 transition-colors"
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="font-semibold text-slate-900">{stock.ticker}</span>
+                      <span className="text-xs text-slate-500">{stock.sector}</span>
+                    </div>
+                    <p className="mt-1 text-sm text-slate-700">{stock.name}</p>
+                  </Link>
+                ))}
+              </div>
+            </section>
+          </div>
+
+          <section className="bg-slate-900 text-white rounded-xl p-5 sm:p-6" aria-labelledby="source-note-title">
+            <h3 id="source-note-title" className="text-lg font-semibold">데이터 출처와 이용 범위</h3>
+            <p className="mt-2 text-sm leading-6 text-slate-200">
+              공시 데이터는 SEC EDGAR에 공개된 기업 보고서를 기반으로 분석하며, 실적 일정과 경제지표는 외부
+              데이터 제공처의 업데이트 상태에 따라 지연되거나 수정될 수 있습니다. 화면의 숫자와 요약은 정보
+              탐색을 돕기 위한 참고 자료이며, 최종 투자 판단은 공식 원문, 회사 IR 자료, 회계 주석, 본인의
+              투자 기준을 함께 검토해 내려야 합니다.
+            </p>
+          </section>
+        </section>
       </div>
     </div>
   );
