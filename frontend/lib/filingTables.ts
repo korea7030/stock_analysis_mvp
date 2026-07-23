@@ -223,6 +223,19 @@ export function annotateTableHTML(html: string, kind: AnnotateKind): string {
       return;
     }
 
+    if (numericCells.length >= 2 && numericCells.length % 2 === 0) {
+      for (let groupStart = 0; groupStart < numericCells.length; groupStart += 2) {
+        const prevCell = numericCells[groupStart];
+        const curCell = numericCells[groupStart + 1];
+        const cur = parseNumLocal(curCell.textContent);
+        const prev = parseNumLocal(prevCell.textContent);
+        if (cur == null || prev == null || cellHasBadge(curCell)) continue;
+        const pct = prev !== 0 ? (cur - prev) / Math.abs(prev) : 0;
+        curCell.appendChild(makeBadgeLocal(pct));
+      }
+      return;
+    }
+
     if (numericCells.length >= 2) {
       const curCell = numericCells[0];
       const prevCell = numericCells[1];
