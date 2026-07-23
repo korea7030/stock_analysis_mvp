@@ -5,7 +5,7 @@ from typing import Any, cast
 import pytest
 from bs4 import BeautifulSoup
 
-from backend.analyzer import extract_metrics, parse_number, run_analysis
+from backend.analyzer import annotate_income_html, extract_metrics, parse_number, run_analysis
 
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
@@ -234,3 +234,34 @@ def test_income_ascending_year_columns_produces_positive_badges(monkeypatch: pyt
     # ascending 표라도 데이터 행에는 양수(▲) 배지가 박혀야 함 (▼ 가 아님)
     assert "▲" in income_html
     assert "▼" not in income_html
+
+
+def test_income_annotation_skips_percentage_metric_rows() -> None:
+    income_html = """
+    <table>
+      <tr><td></td><td>2025</td><td>2026</td><td>2025</td><td>2026</td></tr>
+      <tr>
+        <td>Revenues</td>
+        <td><ix:nonfraction>90,000</ix:nonfraction></td>
+        <td><ix:nonfraction>100,000</ix:nonfraction></td>
+        <td><ix:nonfraction>180,000</ix:nonfraction></td>
+        <td><ix:nonfraction>210,000</ix:nonfraction></td>
+      </tr>
+      <tr>
+        <td>Operating margin</td>
+        <td>32%</td>
+        <td>34%</td>
+        <td>31%</td>
+        <td>35%</td>
+      </tr>
+    </table>
+    """
+
+    annotated = annotate_income_html(income_html)
+    soup = BeautifulSoup(annotated, "lxml")
+
+    revenue_row = soup.find("td", string="Revenues").find_parent("tr")
+    margin_row = soup.find("td", string="Operating margin").find_parent("tr")
+
+    assert revenue_row.find(class_="delta-badge") is not None
+    assert margin_row.find(class_="delta-badge") is None

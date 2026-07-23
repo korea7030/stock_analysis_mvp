@@ -561,14 +561,12 @@ export default function Dashboard() {
     const current = metric?.current ?? null;
     const previous = metric?.previous ?? null;
     const change = metric?.change_pct ?? null;
-    const isPositive = change !== null && change > 0;
-    const isNegative = change !== null && change < 0;
     return (
       <tr key={label} className="hover:bg-slate-50 transition-colors">
         <td className="text-left font-medium py-2 px-3 text-sm text-slate-700">{label}</td>
         <td className="text-right py-2 px-3 text-sm font-mono">{formatNumber(current)}</td>
         <td className="text-right py-2 px-3 text-sm font-mono text-slate-500">{formatNumber(previous)}</td>
-        <td className={`text-right py-2 px-3 text-sm font-medium ${isPositive ? "text-green-600" : isNegative ? "text-red-500" : "text-slate-500"}`}>
+        <td className="text-right py-2 px-3 text-sm font-medium text-slate-700">
           {formatPct(change)}
         </td>
       </tr>

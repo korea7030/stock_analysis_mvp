@@ -64,6 +64,11 @@ export function annotateTableHTML(html: string, kind: AnnotateKind): string {
     return false;
   };
 
+  const isPercentageMetricRow = (row: HTMLTableRowElement): boolean =>
+    Array.from(row.querySelectorAll("td,th")).some((cell) =>
+      (cell.textContent || "").includes("%"),
+    );
+
   const yearRowYears = (() => {
     for (const row of rows) {
       const tr = row as HTMLTableRowElement;
@@ -87,6 +92,7 @@ export function annotateTableHTML(html: string, kind: AnnotateKind): string {
   rows.forEach((row) => {
     const tr = row as HTMLTableRowElement;
     if (isHeaderRow(tr)) return;
+    if (isPercentageMetricRow(tr)) return;
 
     const cells = Array.from(tr.querySelectorAll("td"));
     if (!cells.length) return;

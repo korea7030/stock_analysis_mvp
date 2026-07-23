@@ -92,6 +92,13 @@ def _iter_row_numeric_cells(row):
         yield td, val
 
 
+def _row_contains_percentage_metric(row) -> bool:
+    for cell in row.find_all(["td", "th"]):
+        if "%" in cell.get_text(" ", strip=True):
+            return True
+    return False
+
+
 # ----------------------------
 # Income Statement Badge
 # ----------------------------
@@ -116,6 +123,8 @@ def annotate_income_html(income_html: str) -> str:
 
         # 반드시 4개 (3M curr / prev, 9M curr / prev)
         if len(numeric_cells) < 4:
+            continue
+        if _row_contains_percentage_metric(tr):
             continue
 
         # 연도 헤더 행(예: 2024 | 2025 | 2024 | 2025) 에는 배지를 박지 않는다.
