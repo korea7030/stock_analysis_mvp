@@ -15,6 +15,11 @@ def _read_fixture(name: str) -> str:
     return (FIXTURES_DIR / name).read_text(encoding="utf-8")
 
 
+@pytest.fixture(autouse=True)
+def _no_sec_downloader_network(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("backend.analyzer.get_sec_downloader", lambda: object())
+
+
 def test_schema_shape(monkeypatch: pytest.MonkeyPatch) -> None:
     fixture_html = _read_fixture("mini_filing.html")
 

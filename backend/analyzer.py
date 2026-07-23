@@ -5,10 +5,10 @@ from datetime import datetime
 from typing import Any, Callable
 
 from bs4 import BeautifulSoup, XMLParsedAsHTMLWarning
-from sec_downloader import Downloader
 
 from .clients import (
     get_weekly_earnings,
+    get_sec_downloader,
     sec_download_filing_url,
     sec_get_exhibit_urls,
     sec_get_filing_html,
@@ -662,10 +662,7 @@ def run_analysis(
         if progress_cb is not None:
             progress_cb(msg)
 
-    dl = Downloader(
-        company_name="Stock Analysis MVP",
-        email_address="korea7030.jhl@gmail.com"
-    )
+    dl = get_sec_downloader()
 
     _emit("SEC EDGAR에서 공시 검색 중...")
     html, filing_meta, source_url = _get_best_filing_html(dl, ticker=ticker, form=form)

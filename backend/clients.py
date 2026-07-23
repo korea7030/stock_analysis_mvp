@@ -3,6 +3,7 @@ from __future__ import annotations
 import time
 import os
 import concurrent.futures
+import threading
 import urllib.parse
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Callable, Optional, TypeVar
@@ -34,14 +35,17 @@ def convert_et_to_kst(date_str: str, time_str: str) -> tuple[str, str]:
 import requests
 from bs4 import BeautifulSoup
 from pyrate_limiter import Duration, Limiter, Rate
+from sec_downloader import Downloader
 from sec_downloader.types import RequestedFilings
 
 from .cache import TTLCache
 
 
-SEC_RPS = int(os.getenv("SEC_RPS", "10"))
+SEC_RPS = int(os.getenv("SEC_RPS", "5"))
 MARKETBEAT_RPS = int(os.getenv("MARKETBEAT_RPS", "2"))
 NASDAQ_RPS = int(os.getenv("NASDAQ_RPS", "2"))
+SEC_429_BASE_SLEEP_S = float(os.getenv("SEC_429_BASE_SLEEP_S", "5"))
+SEC_429_MAX_SLEEP_S = float(os.getenv("SEC_429_MAX_SLEEP_S", "60"))
 
 SEC_LIMITER = Limiter(Rate(SEC_RPS, Duration.SECOND))
 MARKETBEAT_LIMITER = Limiter(Rate(MARKETBEAT_RPS, Duration.SECOND))
@@ -65,6 +69,33 @@ class HttpStatusError(RuntimeError):
         self.status_code = status_code
 
 
+def _exception_status_code(exc: Exception) -> int | None:
+    if isinstance(exc, HttpStatusError):
+        return exc.status_code
+    response = getattr(exc, "response", None)
+    status_code = getattr(response, "status_code", None)
+    if isinstance(status_code, int):
+        return status_code
+    text = str(exc)
+    if "429" in text and "Too Many Requests" in text:
+        return 429
+    return None
+
+
+def _exception_retry_after_s(exc: Exception) -> float | None:
+    response = getattr(exc, "response", None)
+    headers = getattr(response, "headers", None)
+    if not headers:
+        return None
+    retry_after = headers.get("Retry-After") if hasattr(headers, "get") else None
+    if not retry_after:
+        return None
+    try:
+        return max(0.0, float(retry_after))
+    except ValueError:
+        return None
+
+
 def _retry(
     fn: Callable[[], T],
     *,
@@ -77,25 +108,58 @@ def _retry(
     for attempt in range(1, attempts + 1):
         try:
             return fn()
-        except HttpStatusError as e:
-            if e.status_code != 429:
+        except Exception as e:
+            status_code = _exception_status_code(e)
+            if isinstance(e, HttpStatusError) and status_code != 429:
                 raise
             last_exc = e
             if attempt == attempts:
                 break
-            sleep_s = min(max_sleep_s, base_sleep_s * (2 ** (attempt - 1)))
-            print(f"[{label}] retry attempt={attempt} sleep_s={sleep_s:.2f} status={e.status_code}")
-            time.sleep(sleep_s)
-        except Exception as e:
-            last_exc = e
-            if attempt == attempts:
-                break
-            sleep_s = min(max_sleep_s, base_sleep_s * (2 ** (attempt - 1)))
-            print(f"[{label}] retry attempt={attempt} sleep_s={sleep_s:.2f} error={type(e).__name__}: {e}")
+            if status_code == 429:
+                retry_after_s = _exception_retry_after_s(e)
+                sleep_s = retry_after_s if retry_after_s is not None else min(
+                    SEC_429_MAX_SLEEP_S,
+                    SEC_429_BASE_SLEEP_S * (2 ** (attempt - 1)),
+                )
+                print(f"[{label}] retry attempt={attempt} sleep_s={sleep_s:.2f} status=429")
+            else:
+                sleep_s = min(max_sleep_s, base_sleep_s * (2 ** (attempt - 1)))
+                print(f"[{label}] retry attempt={attempt} sleep_s={sleep_s:.2f} error={type(e).__name__}: {e}")
             time.sleep(sleep_s)
     if last_exc is None:
         raise RuntimeError(f"[{label}] failed without an exception")
     raise last_exc
+
+
+_SEC_DOWNLOADER_LOCK = threading.Lock()
+_SEC_DOWNLOADER: Downloader | None = None
+
+
+def get_sec_downloader() -> Downloader:
+    global _SEC_DOWNLOADER
+    with _SEC_DOWNLOADER_LOCK:
+        if _SEC_DOWNLOADER is not None:
+            return _SEC_DOWNLOADER
+
+        def _call() -> Downloader:
+            t0 = time.time()
+            _limiter_acquire(SEC_LIMITER, "sec")
+            waited_s = time.time() - t0
+            rate_limited = waited_s >= 0.01
+            print(f"[sec_downloader] init rate_limited={rate_limited} waited_s={waited_s:.3f}")
+            return Downloader(
+                company_name=os.getenv("SEC_COMPANY_NAME", "Stock Analysis MVP"),
+                email_address=os.getenv("SEC_EMAIL_ADDRESS", "korea7030.jhl@gmail.com"),
+            )
+
+        _SEC_DOWNLOADER = _retry(
+            _call,
+            attempts=int(os.getenv("SEC_DOWNLOADER_INIT_ATTEMPTS", "4")),
+            base_sleep_s=1.0,
+            max_sleep_s=10.0,
+            label="sec_downloader_init",
+        )
+        return _SEC_DOWNLOADER
 
 
 def sec_get_filing_html(dl: Any, *, ticker: str, form: str, timeout_s: int = 30) -> str:
