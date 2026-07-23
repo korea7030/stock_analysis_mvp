@@ -69,16 +69,30 @@ export function annotateTableHTML(html: string, kind: AnnotateKind): string {
       (cell.textContent || "").includes("%"),
     );
 
+  const extractYears = (text: string): number[] =>
+    Array.from(text.matchAll(/\b(?:19|20)\d{2}\b/g))
+      .map((match) => Number(match[0]))
+      .filter((year) => Number.isFinite(year));
+
   const yearRowYears = (() => {
-    for (const row of rows) {
+    for (const row of rows.slice(0, 12)) {
       const tr = row as HTMLTableRowElement;
+      const rowText = (tr.textContent || "").replace(/\u00a0/g, " ").trim();
       const cells = Array.from(tr.querySelectorAll("td,th"));
       if (!cells.length) continue;
       const cellTexts = cells
         .map((c) => (c.textContent || "").replace(/\u00a0/g, " ").trim())
         .filter(Boolean);
       if (cellTexts.length >= 2 && cellTexts.every((t) => /^(19|20)\d{2}$/.test(t))) {
-        return cellTexts.map((t) => Number(t)).filter((n) => Number.isFinite(n));
+        return Array.from(new Set(cellTexts.map((t) => Number(t)).filter((n) => Number.isFinite(n))));
+      }
+
+      const rowYears = extractYears(rowText);
+      const looksLikeDateHeader =
+        (monthRe.test(rowText) && rowYears.length >= 2) ||
+        /\b(as of|months ended|quarter ended|year ended|years ended)\b/i.test(rowText);
+      if (looksLikeDateHeader && rowYears.length >= 2) {
+        return Array.from(new Set(rowYears));
       }
     }
     return [] as number[];
@@ -194,11 +208,24 @@ export function annotateTableHTML(html: string, kind: AnnotateKind): string {
       return;
     }
 
+    if (yearCount >= 2 && numericCells.length >= yearCount && numericCells.length % yearCount === 0) {
+      const curYearIdx = yearAscending ? yearCount - 1 : 0;
+      const prevYearIdx = yearAscending ? yearCount - 2 : 1;
+      for (let groupStart = 0; groupStart < numericCells.length; groupStart += yearCount) {
+        const curCell = numericCells[groupStart + curYearIdx];
+        const prevCell = numericCells[groupStart + prevYearIdx];
+        const cur = parseNumLocal(curCell.textContent);
+        const prev = parseNumLocal(prevCell.textContent);
+        if (cur == null || prev == null || cellHasBadge(curCell)) continue;
+        const pct = prev !== 0 ? (cur - prev) / Math.abs(prev) : 0;
+        curCell.appendChild(makeBadgeLocal(pct));
+      }
+      return;
+    }
+
     if (numericCells.length >= 2) {
-      const curIdx = yearCount >= 2 && numericCells.length >= yearCount ? (yearAscending ? yearCount - 1 : 0) : 0;
-      const prevIdx = yearCount >= 2 && numericCells.length >= yearCount ? (yearAscending ? yearCount - 2 : 1) : 1;
-      const curCell = numericCells[curIdx];
-      const prevCell = numericCells[prevIdx];
+      const curCell = numericCells[0];
+      const prevCell = numericCells[1];
       const cur = parseNumLocal(curCell.textContent);
       const prev = parseNumLocal(prevCell.textContent);
       if (cur == null || prev == null || cellHasBadge(curCell)) return;
