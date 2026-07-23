@@ -10,6 +10,20 @@ export function annotateTableHTML(html: string, kind: AnnotateKind): string {
 
   const monthRe =
     /\b(January|February|March|April|May|June|July|August|September|October|November|December)\b/i;
+  const monthMap: Record<string, number> = {
+    january: 1,
+    february: 2,
+    march: 3,
+    april: 4,
+    may: 5,
+    june: 6,
+    july: 7,
+    august: 8,
+    september: 9,
+    october: 10,
+    november: 11,
+    december: 12,
+  };
 
   const looksNumeric = (text: string | null) => {
     if (!text) return false;
@@ -74,6 +88,50 @@ export function annotateTableHTML(html: string, kind: AnnotateKind): string {
       .map((match) => Number(match[0]))
       .filter((year) => Number.isFinite(year));
 
+  const parseHeaderDateValue = (text: string): number | null => {
+    const normalized = text.replace(/\u00a0/g, " ").trim();
+    const yearMatch = normalized.match(/\b(?:19|20)\d{2}\b/);
+    if (!yearMatch) return null;
+    const year = Number(yearMatch[0]);
+    const monthMatch = normalized.match(monthRe);
+    const month = monthMatch ? monthMap[monthMatch[0].toLowerCase()] || 0 : 0;
+    const dayMatch = normalized.match(/\b([0-3]?\d),?\s+(?:19|20)\d{2}\b/);
+    const day = dayMatch ? Number(dayMatch[1]) : 0;
+    return year * 10000 + month * 100 + day;
+  };
+
+  const cellGrid = (row: HTMLTableRowElement) => {
+    let col = 0;
+    return Array.from(row.querySelectorAll("td,th")).map((cell) => {
+      const colspan = Math.max(1, Number(cell.getAttribute("colspan") || "1"));
+      const info = {
+        cell: cell as HTMLElement,
+        start: col,
+        end: col + colspan - 1,
+      };
+      col += colspan;
+      return info;
+    });
+  };
+
+  const headerRanges = (() => {
+    for (const row of rows.slice(0, 12)) {
+      const ranges = cellGrid(row as HTMLTableRowElement)
+        .map((info) => ({
+          ...info,
+          dateValue: parseHeaderDateValue(info.cell.textContent || ""),
+        }))
+        .filter((info): info is typeof info & { dateValue: number } => info.dateValue !== null);
+      if (ranges.length >= 2) return ranges;
+    }
+    return [] as { cell: HTMLElement; start: number; end: number; dateValue: number }[];
+  })();
+
+  const headerForCellRange = (start: number, end: number) => {
+    const center = (start + end) / 2;
+    return headerRanges.find((header) => center >= header.start && center <= header.end) || null;
+  };
+
   const yearRowYears = (() => {
     for (const row of rows.slice(0, 12)) {
       const tr = row as HTMLTableRowElement;
@@ -108,15 +166,16 @@ export function annotateTableHTML(html: string, kind: AnnotateKind): string {
     if (isHeaderRow(tr)) return;
     if (isPercentageMetricRow(tr)) return;
 
-    const cells = Array.from(tr.querySelectorAll("td"));
-    if (!cells.length) return;
+    const cellInfos = cellGrid(tr).filter((info) => info.cell.tagName.toLowerCase() === "td");
+    if (!cellInfos.length) return;
 
-    const numericCells = cells.filter((c) => {
-      const t = (c.textContent || "").replace(/\u00a0/g, " ").trim();
+    const numericCellInfos = cellInfos.filter((info) => {
+      const t = (info.cell.textContent || "").replace(/\u00a0/g, " ").trim();
       if (monthRe.test(t) && /\b20\d{2}\b/.test(t)) return false;
       if (/^(19|20)\d{2}$/.test(t)) return false;
       return parseNumLocal(t) !== null;
     });
+    const numericCells = numericCellInfos.map((info) => info.cell);
 
     numericCells.forEach((cell) => {
       cell.classList.add("numeric-cell");
@@ -208,12 +267,22 @@ export function annotateTableHTML(html: string, kind: AnnotateKind): string {
       return;
     }
 
-    if (yearCount >= 2 && numericCells.length >= yearCount && numericCells.length % yearCount === 0) {
-      const curYearIdx = yearAscending ? yearCount - 1 : 0;
-      const prevYearIdx = yearAscending ? yearCount - 2 : 1;
-      for (let groupStart = 0; groupStart < numericCells.length; groupStart += yearCount) {
-        const curCell = numericCells[groupStart + curYearIdx];
-        const prevCell = numericCells[groupStart + prevYearIdx];
+    const cellsWithHeaders = numericCellInfos
+      .map((info) => ({
+        ...info,
+        header: headerForCellRange(info.start, info.end),
+      }))
+      .filter((info): info is typeof info & { header: NonNullable<ReturnType<typeof headerForCellRange>> } => info.header !== null);
+
+    if (cellsWithHeaders.length >= 2) {
+      for (let groupStart = 0; groupStart + 1 < cellsWithHeaders.length; groupStart += 2) {
+        const first = cellsWithHeaders[groupStart];
+        const second = cellsWithHeaders[groupStart + 1];
+        if (first.header.dateValue === second.header.dateValue) continue;
+        const currentInfo = first.header.dateValue > second.header.dateValue ? first : second;
+        const previousInfo = first.header.dateValue > second.header.dateValue ? second : first;
+        const curCell = currentInfo.cell;
+        const prevCell = previousInfo.cell;
         const cur = parseNumLocal(curCell.textContent);
         const prev = parseNumLocal(prevCell.textContent);
         if (cur == null || prev == null || cellHasBadge(curCell)) continue;
