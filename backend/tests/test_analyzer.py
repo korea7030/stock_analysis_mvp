@@ -5,7 +5,7 @@ from typing import Any, cast
 import pytest
 from bs4 import BeautifulSoup
 
-from backend.analyzer import annotate_income_html, extract_metrics, parse_number, run_analysis
+from backend.analyzer import annotate_income_html, extract_metrics, extract_raw_tables, parse_number, run_analysis
 
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
@@ -85,6 +85,23 @@ def test_run_analysis_downloads_latest_primary_doc_from_metadata(monkeypatch: py
     assert meta["filing_date"] == "2026-07-31"
     assert meta["accession_number"] == "0000320193-26-000020"
     assert meta["source_url"] == latest_url
+
+
+def test_text_statement_without_tables_extracts_synthetic_tables() -> None:
+    fixture_html = _read_fixture("text_statement_no_tables.html")
+    income_html, balance_html, cashflow_html = extract_raw_tables(fixture_html)
+
+    assert income_html
+    assert balance_html
+    assert cashflow_html
+
+    metrics = extract_metrics(income_html, balance_html, cashflow_html)
+    assert metrics["revenue"]["current"] == 7814.0
+    assert metrics["revenue"]["previous"] == 4071.0
+    assert metrics["net_income"]["current"] == -541.0
+    assert metrics["cash_and_equivalents"]["current"] == 93522.0
+    assert metrics["total_assets"]["current"] == 192770.0
+    assert metrics["operating_cash_flow"]["current"] == 3466.0
 
 
 def test_parse_number_edge_cases() -> None:

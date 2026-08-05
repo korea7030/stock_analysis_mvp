@@ -4,6 +4,7 @@ import os
 import re
 import warnings
 from datetime import datetime
+from html import escape
 from typing import Any, Callable
 
 from bs4 import BeautifulSoup, XMLParsedAsHTMLWarning
@@ -443,6 +444,112 @@ def _score_cashflow(f: dict[str, float | int | bool | str]) -> int:
         score += 1
     return score
 
+
+_text_value_re = re.compile(r"\$?\s*(?:\([\d,.]+\)|[\d,.]+|—|-)")
+_text_row_re = re.compile(
+    r"([^\.]{3,220}?)\s*\.{5,}\s*"
+    r"((?:\$?\s*(?:\([\d,.]+\)|[\d,.]+|—|-))"
+    r"(?:\s+\$?\s*(?:\([\d,.]+\)|[\d,.]+|—|-)){1,3})"
+)
+
+
+def _normalize_statement_text(soup: BeautifulSoup) -> str:
+    return re.sub(r"\s+", " ", soup.get_text(" ", strip=True)).strip()
+
+
+def _slice_between(text: str, start_markers: list[str], end_markers: list[str]) -> str:
+    lower = text.lower()
+    starts = [lower.find(marker.lower()) for marker in start_markers]
+    starts = [idx for idx in starts if idx >= 0]
+    if not starts:
+        return ""
+    start = min(starts)
+
+    ends = [lower.find(marker.lower(), start + 1) for marker in end_markers]
+    ends = [idx for idx in ends if idx >= 0]
+    end = min(ends) if ends else len(text)
+    return text[start:end]
+
+
+def _parse_text_statement_rows(section_text: str, expected_values: int) -> list[tuple[str, list[str]]]:
+    rows: list[tuple[str, list[str]]] = []
+    for match in _text_row_re.finditer(section_text):
+        raw_label = re.sub(r"\s+", " ", match.group(1)).strip()
+        values = [v.strip() for v in _text_value_re.findall(match.group(2))]
+        if len(values) < expected_values:
+            continue
+        values = values[:expected_values]
+        label = raw_label
+        # Text extracted from image-backed earnings slides can glue header copy to the first row.
+        for marker in [
+            "Revenue",
+            "Cash and cash equivalents",
+            "Operating activities",
+            "Net cash provided by",
+        ]:
+            marker_idx = label.lower().rfind(marker.lower())
+            if marker_idx > 0:
+                label = label[marker_idx:]
+                break
+        rows.append((label, values))
+    return rows
+
+
+def _synthetic_table_html(title: str, years: list[str], rows: list[tuple[str, list[str]]]) -> str | None:
+    if not rows:
+        return None
+    header_cells = "".join(f"<td>{escape(year)}</td>" for year in years)
+    body_rows = [
+        f"<tr><td>{escape(title)}</td>{header_cells}</tr>",
+    ]
+    for label, values in rows:
+        value_cells = "".join(f"<td>{escape(value)}</td>" for value in values)
+        body_rows.append(f"<tr><td>{escape(label)}</td>{value_cells}</tr>")
+    return "<table>" + "".join(body_rows) + "</table>"
+
+
+def _extract_text_statement_tables(soup: BeautifulSoup) -> tuple[str | None, str | None, str | None]:
+    text = _normalize_statement_text(soup)
+    if not text or "....." not in text:
+        return None, None, None
+
+    income_section = _slice_between(
+        text,
+        ["Consolidated Statements of Operations", "Consolidated Statements of Income"],
+        ["Reconciliation of Net Loss", "Consolidated Balance Sheets"],
+    )
+    balance_section = _slice_between(
+        text,
+        ["Consolidated Balance Sheets", "Condensed Consolidated Balance Sheets"],
+        ["Consolidated Statements of Cash", "Net cash provided by", "About "],
+    )
+    cashflow_section = _slice_between(
+        text,
+        ["Consolidated Statements of Cash", "Net cash provided by"],
+        ["About ", "Forward Looking Statements"],
+    )
+
+    income_rows = _parse_text_statement_rows(income_section, expected_values=4)
+    balance_rows = _parse_text_statement_rows(balance_section, expected_values=2)
+    cashflow_rows = _parse_text_statement_rows(cashflow_section, expected_values=2)
+
+    income_html = _synthetic_table_html(
+        "Consolidated Statements of Operations",
+        ["2026", "2025", "2026", "2025"],
+        income_rows,
+    )
+    balance_html = _synthetic_table_html(
+        "Consolidated Balance Sheets",
+        ["2026", "2025"],
+        balance_rows,
+    )
+    cashflow_html = _synthetic_table_html(
+        "Consolidated Statements of Cash Flows",
+        ["2026", "2025"],
+        cashflow_rows,
+    )
+    return income_html, balance_html, cashflow_html
+
 def extract_raw_tables(html):
     soup = BeautifulSoup(html, "lxml")
 
@@ -466,6 +573,12 @@ def extract_raw_tables(html):
     income_html = best_income[1] if best_income[0] >= INCOME_MIN_SCORE else None
     balance_html = best_balance[1] if best_balance[0] >= BALANCE_MIN_SCORE else None
     cashflow_html = best_cashflow[1] if best_cashflow[0] >= CASHFLOW_MIN_SCORE else None
+
+    if not (income_html and balance_html and cashflow_html):
+        text_income, text_balance, text_cashflow = _extract_text_statement_tables(soup)
+        income_html = income_html or text_income
+        balance_html = balance_html or text_balance
+        cashflow_html = cashflow_html or text_cashflow
 
     return income_html, balance_html, cashflow_html
 
