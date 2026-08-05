@@ -263,8 +263,19 @@ def sec_get_filing_metadatas(
     form: str,
     limit: int,
 ) -> list[Any]:
-    query = RequestedFilings(ticker_or_cik=ticker, form_type=form, limit=limit)
-    return list(dl.get_filing_metadatas(query))
+    def _call() -> list[Any]:
+        t0 = time.time()
+        _limiter_acquire(SEC_LIMITER, "sec")
+        waited_s = time.time() - t0
+        rate_limited = waited_s >= 0.01
+        print(
+            f"[sec_metadata] ticker={ticker} form={form} limit={limit} "
+            f"rate_limited={rate_limited} waited_s={waited_s:.3f}"
+        )
+        query = RequestedFilings(ticker_or_cik=ticker, form_type=form, limit=limit)
+        return list(dl.get_filing_metadatas(query))
+
+    return _retry(_call, attempts=3, base_sleep_s=0.5, max_sleep_s=4.0, label="sec_metadata")
 
 
 def sec_download_filing_url(dl: Any, *, url: str) -> str:

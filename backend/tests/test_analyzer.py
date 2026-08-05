@@ -15,6 +15,19 @@ def _read_fixture(name: str) -> str:
     return (FIXTURES_DIR / name).read_text(encoding="utf-8")
 
 
+class _FakeFilingMeta:
+    def __init__(
+        self,
+        *,
+        filing_date: str,
+        accession_number: str,
+        primary_doc_url: str,
+    ) -> None:
+        self.filing_date = filing_date
+        self.accession_number = accession_number
+        self.primary_doc_url = primary_doc_url
+
+
 @pytest.fixture(autouse=True)
 def _no_sec_downloader_network(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("backend.analyzer.get_sec_downloader", lambda: object())
@@ -41,6 +54,37 @@ def test_schema_shape(monkeypatch: pytest.MonkeyPatch) -> None:
     assert tables["income_statement"]
     assert tables["balance_sheet"]
     assert tables["cash_flow"]
+
+
+def test_run_analysis_downloads_latest_primary_doc_from_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
+    fixture_html = _read_fixture("mini_filing.html")
+    latest_url = "https://www.sec.gov/Archives/edgar/data/320193/latest.htm"
+    latest_meta = _FakeFilingMeta(
+        filing_date="2026-07-31",
+        accession_number="0000320193-26-000020",
+        primary_doc_url=latest_url,
+    )
+
+    monkeypatch.setattr(
+        "backend.analyzer.sec_get_filing_metadatas",
+        lambda *_args, **_kwargs: [latest_meta],
+    )
+
+    downloaded_urls: list[str] = []
+
+    def _fake_download_url(_dl: object, *, url: str) -> str:
+        downloaded_urls.append(url)
+        return fixture_html
+
+    monkeypatch.setattr("backend.analyzer.sec_download_filing_url", _fake_download_url)
+
+    result = cast(dict[str, Any], run_analysis("AAPL", "10-Q"))
+    meta = cast(dict[str, Any], result["meta"])
+
+    assert downloaded_urls == [latest_url]
+    assert meta["filing_date"] == "2026-07-31"
+    assert meta["accession_number"] == "0000320193-26-000020"
+    assert meta["source_url"] == latest_url
 
 
 def test_parse_number_edge_cases() -> None:

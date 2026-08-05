@@ -73,6 +73,17 @@ jobs:
           docker push ${{ env.ARTIFACT_REGISTRY }}/${{ env.PROJECT_ID }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
           docker push ${{ env.ARTIFACT_REGISTRY }}/${{ env.PROJECT_ID }}/${{ env.IMAGE_NAME }}:latest
 
+      - name: Validate required deployment secrets
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          if [ -z "$OPENAI_API_KEY" ]; then
+            echo "::error::Missing GitHub Actions secret: OPENAI_API_KEY"
+            echo "Add it in GitHub repository Settings > Secrets and variables > Actions > Secrets."
+            exit 1
+          fi
+          echo "OPENAI_API_KEY is configured."
+
       - name: Deploy to Cloud Run
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
@@ -98,9 +109,7 @@ jobs:
           if [ -n "$DATABASE_URL" ]; then
             ENV_VARS="${ENV_VARS}|DATABASE_URL=${DATABASE_URL}"
           fi
-          if [ -n "$OPENAI_API_KEY" ]; then
-            ENV_VARS="${ENV_VARS}|OPENAI_API_KEY=${OPENAI_API_KEY}"
-          fi
+          ENV_VARS="${ENV_VARS}|OPENAI_API_KEY=${OPENAI_API_KEY}"
 
           gcloud run deploy stock-backend-api \
             --image=${{ env.ARTIFACT_REGISTRY }}/${{ env.PROJECT_ID }}/${{ env.IMAGE_NAME }}:${{ github.sha }} \

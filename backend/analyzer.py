@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import os
 import re
 import warnings
@@ -191,7 +193,7 @@ def annotate_income_html(income_html: str) -> str:
 # META 추출
 # ----------------------------
 
-MetaDict = dict[str, str | None]
+MetaDict = dict[str, "str | None"]
 
 
 def extract_meta(html: str, ticker: str, form: str) -> MetaDict:
@@ -534,7 +536,7 @@ def _metric_payload(values: list[float]) -> dict[str, float | None]:
     }
 
 
-MetricPayload = dict[str, float | None]
+MetricPayload = dict[str, "float | None"]
 MetricsDict = dict[str, MetricPayload]
 
 
@@ -700,12 +702,22 @@ def _get_best_filing_html(
     ticker: str,
     form: str,
 ) -> tuple[str, object | None, str | None]:
-    # For 6-K/8-K, the latest filing is often non-financial. Try multiple recent filings and exhibits.
-    if form not in {"6-K", "8-K"}:
-        return sec_get_filing_html(dl, ticker=ticker, form=form), None, None
-
     max_filings = int(os.getenv("SEC_MAX_FILINGS", "5"))
-    metadatas = sec_get_filing_metadatas(dl, ticker=ticker, form=form, limit=max_filings)
+    try:
+        metadatas = sec_get_filing_metadatas(dl, ticker=ticker, form=form, limit=max_filings)
+    except Exception:
+        if form not in {"6-K", "8-K"}:
+            return sec_get_filing_html(dl, ticker=ticker, form=form), None, None
+        raise
+
+    if form not in {"6-K", "8-K"}:
+        latest_meta = metadatas[0] if metadatas else None
+        primary = str(getattr(latest_meta, "primary_doc_url", "") or "") if latest_meta is not None else ""
+        if primary:
+            return sec_download_filing_url(dl, url=primary), latest_meta, primary
+        return sec_get_filing_html(dl, ticker=ticker, form=form), latest_meta, None
+
+    # For 6-K/8-K, the latest filing is often non-financial. Try multiple recent filings and exhibits.
     for meta in metadatas:
         cik = str(getattr(meta, "cik", "") or "")
         accession = str(getattr(meta, "accession_number", "") or "")

@@ -14,7 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 
 from backend.analyzer import run_analysis
-from backend.clients import get_logical_today
+from backend.clients import get_logical_today, get_sec_downloader, sec_get_filing_metadatas
 from backend.cache import TTLCache
 from backend.rate_limiter import SlidingWindowRateLimiter
 from backend.models import (
@@ -52,6 +52,7 @@ app = FastAPI(
 
 EARNINGS_CACHE_TTL_S = int(os.getenv("EARNINGS_CACHE_TTL_S", "21600"))
 ANALYZE_CACHE_TTL_S = int(os.getenv("ANALYZE_CACHE_TTL_S", "43200"))
+ANALYZE_CACHE_VALIDATE_LATEST = os.getenv("ANALYZE_CACHE_VALIDATE_LATEST", "true").lower() not in {"0", "false", "no"}
 
 _earnings_cache: TTLCache[list[dict[str, Any]]] = TTLCache()
 _earnings_last_success: list[dict[str, Any]] | None = None
@@ -127,18 +128,21 @@ async def analyze(
     cache_key = f"analyze:{normalized_ticker}:{normalized_form}"
     cached_payload = _load_analyze_cache(cache_key)
     if cached_payload is not None:
-        cached_last_updated = _last_updated_if_today(cached_payload.get("last_updated"))
-        if cached_last_updated is None:
-            cached_payload = dict(cached_payload)
-            cached_payload.pop("last_updated", None)
-        if not _has_financial_data(cached_payload):
-            return _error_response(
-                status_code=422,
-                code="no_financial_data",
-                message="해당 보고서에는 재무제표/지표 데이터가 없습니다. 다른 보고서를 선택해 주세요.",
-            )
-        print(f"[cache] kind=analyze cache_hit=true key={cache_key}")
-        return cached_payload
+        cached_payload = _prepare_cached_analyze_payload(
+            cached_payload,
+            ticker=normalized_ticker,
+            form=normalized_form,
+            cache_key=cache_key,
+        )
+        if cached_payload is not None:
+            if not _has_financial_data(cached_payload):
+                return _error_response(
+                    status_code=422,
+                    code="no_financial_data",
+                    message="해당 보고서에는 재무제표/지표 데이터가 없습니다. 다른 보고서를 선택해 주세요.",
+                )
+            print(f"[cache] kind=analyze cache_hit=true key={cache_key}")
+            return cached_payload
 
     print(f"[cache] kind=analyze cache_hit=false key={cache_key}")
 
@@ -342,21 +346,23 @@ async def analyze_stream(
     cache_key = f"analyze:{normalized_ticker}:{normalized_form}"
     cached_payload = _load_analyze_cache(cache_key)
     if cached_payload is not None:
-        cached_last_updated = _last_updated_if_today(cached_payload.get("last_updated"))
-        if cached_last_updated is None:
-            cached_payload = dict(cached_payload)
-            cached_payload.pop("last_updated", None)
+        cached_payload = _prepare_cached_analyze_payload(
+            cached_payload,
+            ticker=normalized_ticker,
+            form=normalized_form,
+            cache_key=cache_key,
+        )
+        if cached_payload is not None:
+            if not _has_financial_data(cached_payload):
+                async def _no_data_cached():
+                    payload = json.dumps({"type": "error", "code": "no_financial_data", "message": "해당 보고서에는 재무제표/지표 데이터가 없습니다. 다른 보고서를 선택해 주세요."})
+                    yield f"data: {payload}\n\n"
+                return StreamingResponse(_no_data_cached(), media_type="text/event-stream")
 
-        if not _has_financial_data(cached_payload):
-            async def _no_data_cached():
-                payload = json.dumps({"type": "error", "code": "no_financial_data", "message": "해당 보고서에는 재무제표/지표 데이터가 없습니다. 다른 보고서를 선택해 주세요."})
-                yield f"data: {payload}\n\n"
-            return StreamingResponse(_no_data_cached(), media_type="text/event-stream")
-
-        async def _cached():
-            yield f"data: {json.dumps({'type': 'progress', 'message': '캐시에서 로드 중...'})}\n\n"
-            yield f"data: {json.dumps({'type': 'result', 'data': cached_payload})}\n\n"
-        return StreamingResponse(_cached(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+            async def _cached():
+                yield f"data: {json.dumps({'type': 'progress', 'message': '캐시에서 로드 중...'})}\n\n"
+                yield f"data: {json.dumps({'type': 'result', 'data': cached_payload})}\n\n"
+            return StreamingResponse(_cached(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
     event_queue: queue.Queue[dict[str, Any]] = queue.Queue()
 
@@ -756,12 +762,79 @@ def _load_analyze_cache(cache_key: str) -> dict[str, Any] | None:
 
 
 def _save_analyze_cache(cache_key: str, payload: dict[str, Any]) -> None:
-    _analyze_cache.set(cache_key, payload, ANALYZE_CACHE_TTL_S)
+    cache_payload = _with_latest_cache_marker(payload)
+    _analyze_cache.set(cache_key, cache_payload, ANALYZE_CACHE_TTL_S)
     save_response_cache(
         cache_key=cache_key,
-        payload=payload,
+        payload=cache_payload,
         ttl_s=ANALYZE_CACHE_TTL_S,
     )
+
+
+def _with_latest_cache_marker(payload: dict[str, Any]) -> dict[str, Any]:
+    if not ANALYZE_CACHE_VALIDATE_LATEST:
+        return payload
+
+    cache_payload = dict(payload)
+    meta = dict(cache_payload.get("meta") or {})
+    ticker = str(meta.get("ticker") or "").strip()
+    form = str(meta.get("report_type") or "").strip()
+    latest_accession = _latest_sec_accession(ticker=ticker, form=form)
+    if latest_accession:
+        cache_payload["_cache_latest_accession"] = latest_accession
+    return cache_payload
+
+
+def _prepare_cached_analyze_payload(
+    cached_payload: dict[str, Any],
+    *,
+    ticker: str,
+    form: str,
+    cache_key: str,
+) -> dict[str, Any] | None:
+    payload = dict(cached_payload)
+    payload.pop("_cache_latest_accession", None)
+    cached_last_updated = _last_updated_if_today(payload.get("last_updated"))
+    if cached_last_updated is None:
+        payload.pop("last_updated", None)
+
+    if not _cached_analyze_payload_is_latest(cached_payload, ticker=ticker, form=form):
+        print(f"[cache] kind=analyze stale=true key={cache_key}")
+        return None
+
+    return payload
+
+
+def _cached_analyze_payload_is_latest(payload: dict[str, Any], *, ticker: str, form: str) -> bool:
+    if not ANALYZE_CACHE_VALIDATE_LATEST:
+        return True
+
+    cached_marker = str(payload.get("_cache_latest_accession") or "").strip()
+    cached_result_accession = str(((payload.get("meta") or {}).get("accession_number") or "")).strip()
+    compare_accession = cached_marker or cached_result_accession
+    if not compare_accession:
+        return False
+
+    latest_accession = _latest_sec_accession(ticker=ticker, form=form)
+    if not latest_accession:
+        return True
+    return latest_accession == compare_accession
+
+
+def _latest_sec_accession(*, ticker: str, form: str) -> str | None:
+    if not ticker or not form:
+        return None
+    try:
+        dl = get_sec_downloader()
+        metadatas = sec_get_filing_metadatas(dl, ticker=ticker, form=form, limit=1)
+    except Exception as e:
+        print(f"[cache] kind=analyze latest_check_failed ticker={ticker} form={form} error={type(e).__name__}: {e}")
+        return None
+    latest_meta = metadatas[0] if metadatas else None
+    latest_accession = str(getattr(latest_meta, "accession_number", "") or "").strip()
+    if not latest_accession:
+        return None
+    return latest_accession
 
 
 def _error_response(
