@@ -120,14 +120,6 @@ async def analyze(
             message=str(validation_error),
         )
 
-    rate_limit_response = _check_analyze_rate_limit(
-        request,
-        ticker=normalized_ticker,
-        form=normalized_form,
-    )
-    if rate_limit_response is not None:
-        return rate_limit_response
-
     cache_key = f"analyze:{normalized_ticker}:{normalized_form}"
     cached_payload = _load_analyze_cache(cache_key)
     if cached_payload is not None:
@@ -146,6 +138,14 @@ async def analyze(
                 )
             print(f"[cache] kind=analyze cache_hit=true key={cache_key}")
             return cached_payload
+
+    rate_limit_response = _check_analyze_rate_limit(
+        request,
+        ticker=normalized_ticker,
+        form=normalized_form,
+    )
+    if rate_limit_response is not None:
+        return rate_limit_response
 
     print(f"[cache] kind=analyze cache_hit=false key={cache_key}")
 
@@ -332,20 +332,6 @@ async def analyze_stream(
             yield f"data: {payload}\n\n"
         return StreamingResponse(_validation_err(), media_type="text/event-stream")
 
-    rate_limit_error = _check_analyze_rate_limit_payload(
-        request,
-        ticker=normalized_ticker,
-        form=normalized_form,
-    )
-    if rate_limit_error is not None:
-        async def _rate_limited():
-            yield f"data: {json.dumps(rate_limit_error)}\n\n"
-        return StreamingResponse(
-            _rate_limited(),
-            media_type="text/event-stream",
-            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-        )
-
     cache_key = f"analyze:{normalized_ticker}:{normalized_form}"
     cached_payload = _load_analyze_cache(cache_key)
     if cached_payload is not None:
@@ -366,6 +352,20 @@ async def analyze_stream(
                 yield f"data: {json.dumps({'type': 'progress', 'message': '캐시에서 로드 중...'})}\n\n"
                 yield f"data: {json.dumps({'type': 'result', 'data': cached_payload})}\n\n"
             return StreamingResponse(_cached(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+    rate_limit_error = _check_analyze_rate_limit_payload(
+        request,
+        ticker=normalized_ticker,
+        form=normalized_form,
+    )
+    if rate_limit_error is not None:
+        async def _rate_limited():
+            yield f"data: {json.dumps(rate_limit_error)}\n\n"
+        return StreamingResponse(
+            _rate_limited(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
 
     event_queue: queue.Queue[dict[str, Any]] = queue.Queue()
 
