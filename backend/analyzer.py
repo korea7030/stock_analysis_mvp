@@ -62,7 +62,7 @@ def parse_number(text: str) -> float | None:
     if text in {"—", "-", "–", "— —"}:
         return None
 
-    neg = "(" in text and ")" in text
+    neg = ("(" in text and ")" in text) or text.lstrip().startswith("(")
     m = _number_re.search(text.replace(" ", ""))
     if not m:
         return None
@@ -73,6 +73,22 @@ def parse_number(text: str) -> float | None:
         return None
 
     return -val if neg else val
+
+
+def _ix_nonfraction_is_negative(tag) -> bool:
+    return str(tag.attrs.get("sign") or "").strip() == "-"
+
+
+def _apply_ix_sign_markers(soup: BeautifulSoup) -> None:
+    for ix in soup.find_all("ix:nonfraction"):
+        if not _ix_nonfraction_is_negative(ix):
+            continue
+        text = ix.get_text(" ", strip=True)
+        if not text or text.startswith("-") or text.startswith("("):
+            continue
+        if parse_number(text) is None:
+            continue
+        ix.string = f"({text})"
 
 
 def pct_change(curr: float, prev: float) -> float | None:
@@ -88,8 +104,11 @@ def _iter_row_numeric_cells(row):
     for td in row.find_all("td"):
         if has_ix and not td.find("ix:nonfraction"):
             continue
+        ix = td.find("ix:nonfraction")
         txt = td.get_text(" ", strip=True)
         val = parse_number(txt)
+        if val is not None and ix is not None and _ix_nonfraction_is_negative(ix):
+            val = -abs(val)
         if val is None:
             continue
         yield td, val
@@ -552,6 +571,7 @@ def _extract_text_statement_tables(soup: BeautifulSoup) -> tuple[str | None, str
 
 def extract_raw_tables(html):
     soup = BeautifulSoup(html, "lxml")
+    _apply_ix_sign_markers(soup)
 
     best_income: tuple[int, str | None] = (-999, None)
     best_balance: tuple[int, str | None] = (-999, None)

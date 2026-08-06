@@ -110,6 +110,54 @@ def test_parse_number_edge_cases() -> None:
     assert parse_number("—") is None
     assert parse_number("1,234") == 1234.0
     assert parse_number("(1,234)") == -1234.0
+    assert parse_number("(1,234") == -1234.0
+
+
+def test_ix_nonfraction_sign_attribute_is_negative() -> None:
+    fixture_html = """
+    <html>
+      <body>
+        <ix:nonfraction name="dei:EntityRegistrantName">IonQ, Inc.</ix:nonfraction>
+        <ix:nonfraction name="dei:DocumentPeriodEndDate">2026-03-31</ix:nonfraction>
+        <table>
+          <tr><td></td><td>2026</td><td>2025</td></tr>
+          <tr>
+            <td>Statements of Operations</td>
+            <td>Three Months Ended March 31,</td>
+            <td>Three Months Ended March 31,</td>
+          </tr>
+          <tr>
+            <td>Revenue</td>
+            <td><ix:nonfraction>64,668</ix:nonfraction></td>
+            <td><ix:nonfraction>7,566</ix:nonfraction></td>
+          </tr>
+          <tr>
+            <td>Gain (loss) on change in fair value of warrant liabilities</td>
+            <td><ix:nonfraction sign="-">1,057,628</ix:nonfraction></td>
+            <td><ix:nonfraction sign="-">38,494</ix:nonfraction></td>
+          </tr>
+          <tr>
+            <td>Net income (loss)</td>
+            <td><ix:nonfraction>804,610</ix:nonfraction></td>
+            <td><ix:nonfraction>32,252</ix:nonfraction></td>
+          </tr>
+        </table>
+      </body>
+    </html>
+    """
+    income_html, _balance_html, _cashflow_html = extract_raw_tables(fixture_html)
+
+    assert income_html
+    assert "(1,057,628)" in income_html
+
+    soup = BeautifulSoup(income_html, "lxml")
+    row = soup.find("td", string="Gain (loss) on change in fair value of warrant liabilities").find_parent("tr")
+    values = [
+        value
+        for td in row.find_all("td")[1:]
+        if (value := parse_number(td.get_text(" ", strip=True))) is not None
+    ]
+    assert values == [-1057628.0, -38494.0]
 
 
 def test_annotate_income_missing_cells_no_crash(monkeypatch: pytest.MonkeyPatch) -> None:
