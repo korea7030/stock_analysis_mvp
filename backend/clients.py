@@ -631,6 +631,7 @@ def nasdaq_get_weekly_earnings(
     earnings: list[dict[str, Any]] = []
     if limit is not None and limit > 0:
         priority_days = sorted(days, key=lambda d: (abs((d - anchor_date).days), d))
+        reported_target = max(1, limit // 2)
         for d in priority_days:
             try:
                 earnings.extend(
@@ -644,7 +645,10 @@ def nasdaq_get_weekly_earnings(
             except Exception as e:
                 print(f"[nasdaq_fetch] date={d.isoformat()} failed error={type(e).__name__}: {e}")
                 continue
-            if len(earnings) >= limit:
+            reported_count = sum(
+                1 for item in earnings if str(item.get("status") or "").strip().lower() == "reported"
+            )
+            if len(earnings) >= limit and reported_count >= reported_target:
                 return _select_calendar_earnings(earnings, limit=limit, anchor_date=anchor_date)
         return _select_calendar_earnings(earnings, limit=limit, anchor_date=anchor_date)
 
@@ -679,19 +683,41 @@ def _select_calendar_earnings(
     anchor_date: date,
 ) -> list[dict[str, Any]]:
     today_iso = anchor_date.isoformat()
+    upcoming_target = (limit + 1) // 2
+    reported_target = limit - upcoming_target
 
-    def sort_key(item: dict[str, Any]) -> tuple[int, str, str]:
-        status = str(item.get("status") or "").strip().lower()
+    upcoming_items = [
+        item
+        for item in earnings
+        if str(item.get("status") or "").strip().lower() != "reported"
+    ]
+    reported_items = [
+        item
+        for item in earnings
+        if str(item.get("status") or "").strip().lower() == "reported"
+    ]
+
+    def upcoming_sort_key(item: dict[str, Any]) -> tuple[int, str, str]:
         report_date = str(item.get("report_date") or "")
-        if status == "reported":
-            rank = 1
-            date_key = report_date
-        else:
-            rank = 0 if report_date >= today_iso else 2
-            date_key = report_date
-        return (rank, date_key, str(item.get("ticker") or ""))
+        rank = 0 if report_date >= today_iso else 1
+        return (rank, report_date, str(item.get("ticker") or ""))
 
-    return sorted(earnings, key=sort_key)[:limit]
+    def reported_sort_key(item: dict[str, Any]) -> tuple[str, str]:
+        return (str(item.get("report_date") or ""), str(item.get("ticker") or ""))
+
+    selected = (
+        sorted(upcoming_items, key=upcoming_sort_key)[:upcoming_target]
+        + sorted(reported_items, key=reported_sort_key, reverse=True)[:reported_target]
+    )
+    if len(selected) < limit:
+        selected_keys = {(item.get("ticker"), item.get("report_date"), item.get("status")) for item in selected}
+        backfill = [
+            item
+            for item in sorted(earnings, key=upcoming_sort_key)
+            if (item.get("ticker"), item.get("report_date"), item.get("status")) not in selected_keys
+        ]
+        selected.extend(backfill[: limit - len(selected)])
+    return selected[:limit]
 
 
 def get_weekly_earnings(*, limit: int | None = None, include_links: bool = True) -> list[dict[str, Any]]:

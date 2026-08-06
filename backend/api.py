@@ -524,7 +524,7 @@ def calendar(
     if rate_limit_response is not None:
         return rate_limit_response
 
-    cache_key = f"calendar:v4:w{weeks}:k={kind or ''}:s={status or ''}:c={country or ''}:i={importance or ''}:t={ticker or ''}"
+    cache_key = f"calendar:v5:w{weeks}:k={kind or ''}:s={status or ''}:c={country or ''}:i={importance or ''}:t={ticker or ''}"
     cached_payload = _calendar_cache.get(cache_key)
     if cached_payload is not None:
         return cached_payload
