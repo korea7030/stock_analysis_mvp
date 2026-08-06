@@ -146,6 +146,21 @@ export default async function StockPage({ params }: StockPageProps) {
             </div>
           </div>
 
+          <div className="mt-6 rounded-lg border border-slate-200 bg-slate-50 p-5">
+            <h3 className="text-base font-semibold text-slate-900">
+              {stock.ticker} filing checkpoints
+            </h3>
+            <ul className="mt-3 space-y-2 text-sm leading-6 text-slate-600">
+              {stock.watchItems.map((item) => (
+                <li key={item} className="flex gap-2">
+                  <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-slate-400" aria-hidden="true" />
+                  <span>{item}</span>
+                </li>
+              ))}
+            </ul>
+            <p className="mt-4 text-sm leading-6 text-slate-600">{stock.filingFocus}</p>
+          </div>
+
           <div className="mt-6 flex flex-wrap gap-3">
             <Link
               href={analyzerHref}

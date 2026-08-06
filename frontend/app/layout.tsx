@@ -48,6 +48,7 @@ export default function RootLayout({
             </div>
             <nav className="flex flex-wrap gap-x-4 gap-y-2">
               <Link href="/stocks" className="hover:text-slate-900 hover:underline">Stocks</Link>
+              <Link href="/guides" className="hover:text-slate-900 hover:underline">Guides</Link>
               <Link href="/about" className="hover:text-slate-900 hover:underline">About</Link>
               <Link href="/privacy" className="hover:text-slate-900 hover:underline">Privacy</Link>
               <Link href="/terms" className="hover:text-slate-900 hover:underline">Terms</Link>

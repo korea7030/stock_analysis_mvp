@@ -18,6 +18,7 @@ import {
 
 import type { AiSummaryResponse, AnalyzeResponse, CalendarItem, FilingForm, MetricValue, MetricHistoryResponse } from "@/lib/apiTypes";
 import { annotateTableHTML } from "@/lib/filingTables";
+import { guideArticles, guidePath } from "./guides/guideData";
 import { stockPath, stockProfiles } from "./siteConfig";
 
 const EARNINGS_PAGE_SIZE = 8;
@@ -1377,6 +1378,35 @@ export default function Dashboard() {
               </div>
             </section>
           </div>
+
+          <section className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm" aria-labelledby="filing-guides-title">
+            <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-2">
+              <div>
+                <h3 id="filing-guides-title" className="text-lg font-semibold text-slate-900">
+                  SEC 공시 해설 가이드
+                </h3>
+                <p className="mt-1 text-sm text-slate-600">
+                  자동 분석 결과를 원문 공시와 대조할 때 필요한 보고서 유형, 재무제표, 실적 발표 자료 해석법입니다.
+                </p>
+              </div>
+              <Link href="/guides" className="text-sm font-medium text-blue-700 hover:underline">
+                전체 가이드 보기
+              </Link>
+            </div>
+            <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3">
+              {guideArticles.map((article) => (
+                <Link
+                  key={article.slug}
+                  href={guidePath(article.slug)}
+                  className="block rounded-lg border border-slate-200 p-3 hover:border-blue-300 hover:bg-blue-50/40 transition-colors"
+                >
+                  <p className="text-xs text-slate-500">{article.readingTime}</p>
+                  <h4 className="mt-1 text-sm font-semibold leading-5 text-slate-900">{article.title}</h4>
+                  <p className="mt-2 line-clamp-3 text-xs leading-5 text-slate-600">{article.description}</p>
+                </Link>
+              ))}
+            </div>
+          </section>
 
           <section className="bg-slate-900 text-white rounded-xl p-5 sm:p-6" aria-labelledby="source-note-title">
             <h3 id="source-note-title" className="text-lg font-semibold">데이터 출처와 이용 범위</h3>

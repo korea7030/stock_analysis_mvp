@@ -29,10 +29,30 @@ export default function AboutPage() {
           ],
         },
         {
+          title: "How data is reviewed",
+          body: [
+            "The service is built to preserve links back to the original filing whenever possible. Users are expected to treat the extracted values as a screening layer and confirm material numbers in the SEC filing, company investor relations release, and related footnotes.",
+            "When a reported value appears inconsistent, the site operator reviews the filing type, filing date, table period, unit scale, negative-number formatting, and GAAP versus non-GAAP presentation before changing parser behavior.",
+          ],
+        },
+        {
           title: "Editorial approach",
           body: [
             "The site is designed as a research utility, not as a stock recommendation service. Explanatory content is intended to help users navigate filings and understand reported data.",
             "Users should read original filings and consult qualified professionals before making financial, legal, tax, or investment decisions.",
+          ],
+        },
+        {
+          title: "Corrections and updates",
+          body: [
+            "Financial filings can be amended, restated, or supplemented by later company releases. Calendar data may also change after an earnings date is announced.",
+            "If you find an incorrect value, missing recent filing, broken source link, or confusing report classification, send the ticker, filing type, filing date, and a short description to the contact address below. Corrections are prioritized when they affect displayed financial values or source-document matching.",
+          ],
+        },
+        {
+          title: "Operator",
+          body: [
+            "SEC Filing Dashboard is operated as an independent financial research and software project. It is not affiliated with the U.S. Securities and Exchange Commission, any listed company, or Google AdSense.",
           ],
         },
         {
