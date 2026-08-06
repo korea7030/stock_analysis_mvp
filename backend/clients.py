@@ -538,6 +538,7 @@ def nasdaq_get_earnings_for_date(
     today: date | None = None,
     now_et: datetime | None = None,
     timeout_s: int = 5,
+    include_links: bool = True,
 ) -> list[dict[str, Any]]:
     date_str = report_date.isoformat()
     url = f"https://api.nasdaq.com/api/calendar/earnings?date={urllib.parse.quote_plus(date_str)}"
@@ -578,8 +579,8 @@ def nasdaq_get_earnings_for_date(
                 today=today,
                 now_et=now_et,
             )
-            earnings_release_url = sec_company_filings_url(ticker=ticker, form_type="8-K")
-            transcript_search_url = seekingalpha_transcripts_url(ticker)
+            earnings_release_url = sec_company_filings_url(ticker=ticker, form_type="8-K") if include_links else None
+            transcript_search_url = seekingalpha_transcripts_url(ticker) if include_links else None
 
             out.append(
                 {
@@ -607,12 +608,17 @@ def nasdaq_get_earnings_for_date(
     return _retry(_call, attempts=1, base_sleep_s=0.5, max_sleep_s=4.0, label="nasdaq_fetch")
 
 
-def nasdaq_get_weekly_earnings(anchor_date: date | None = None) -> list[dict[str, Any]]:
+def nasdaq_get_weekly_earnings(
+    anchor_date: date | None = None,
+    *,
+    limit: int | None = None,
+    include_links: bool = True,
+) -> list[dict[str, Any]]:
     if anchor_date is None:
         anchor_date = get_logical_today()
 
     week_start = anchor_date - timedelta(days=anchor_date.weekday())
-    days = [week_start + timedelta(days=i) for i in range(7)]
+    days = [week_start + timedelta(days=i) for i in range(5)]
 
     now_et: datetime | None = None
     try:
@@ -623,10 +629,35 @@ def nasdaq_get_weekly_earnings(anchor_date: date | None = None) -> list[dict[str
         now_et = None
 
     earnings: list[dict[str, Any]] = []
+    if limit is not None and limit > 0:
+        priority_days = sorted(days, key=lambda d: (abs((d - anchor_date).days), d))
+        for d in priority_days:
+            try:
+                earnings.extend(
+                    nasdaq_get_earnings_for_date(
+                        d,
+                        today=anchor_date,
+                        now_et=now_et,
+                        include_links=include_links,
+                    )
+                )
+            except Exception as e:
+                print(f"[nasdaq_fetch] date={d.isoformat()} failed error={type(e).__name__}: {e}")
+                continue
+            if len(earnings) >= limit:
+                return _select_calendar_earnings(earnings, limit=limit, anchor_date=anchor_date)
+        return _select_calendar_earnings(earnings, limit=limit, anchor_date=anchor_date)
+
     max_workers = max(1, min(len(days), int(os.getenv("CALENDAR_FETCH_WORKERS", "4"))))
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
         future_to_day = {
-            executor.submit(nasdaq_get_earnings_for_date, d, today=anchor_date, now_et=now_et): d
+            executor.submit(
+                nasdaq_get_earnings_for_date,
+                d,
+                today=anchor_date,
+                now_et=now_et,
+                include_links=include_links,
+            ): d
             for d in days
         }
         for future in concurrent.futures.as_completed(future_to_day):
@@ -636,19 +667,43 @@ def nasdaq_get_weekly_earnings(anchor_date: date | None = None) -> list[dict[str
             except Exception as e:
                 print(f"[nasdaq_fetch] date={d.isoformat()} failed error={type(e).__name__}: {e}")
 
+    if limit is not None and limit > 0:
+        earnings = _select_calendar_earnings(earnings, limit=limit, anchor_date=anchor_date)
     return earnings
 
 
-def get_weekly_earnings() -> list[dict[str, Any]]:
+def _select_calendar_earnings(
+    earnings: list[dict[str, Any]],
+    *,
+    limit: int,
+    anchor_date: date,
+) -> list[dict[str, Any]]:
+    today_iso = anchor_date.isoformat()
+
+    def sort_key(item: dict[str, Any]) -> tuple[int, str, str]:
+        status = str(item.get("status") or "").strip().lower()
+        report_date = str(item.get("report_date") or "")
+        if status == "reported":
+            rank = 1
+            date_key = report_date
+        else:
+            rank = 0 if report_date >= today_iso else 2
+            date_key = report_date
+        return (rank, date_key, str(item.get("ticker") or ""))
+
+    return sorted(earnings, key=sort_key)[:limit]
+
+
+def get_weekly_earnings(*, limit: int | None = None, include_links: bool = True) -> list[dict[str, Any]]:
     nasdaq_list: list[dict[str, Any]] = []
     try:
-        nasdaq_list = nasdaq_get_weekly_earnings()
+        nasdaq_list = nasdaq_get_weekly_earnings(limit=limit, include_links=include_links)
     except Exception as e:
         print(f"[earnings] nasdaq_failed error={type(e).__name__}: {e}")
 
     marketbeat_list: list[dict[str, Any]] = []
     try:
-        marketbeat_list = marketbeat_get_weekly_earnings()
+        marketbeat_list = marketbeat_get_weekly_earnings() if limit is None else []
     except Exception as e:
         print(f"[earnings] marketbeat_failed error={type(e).__name__}: {e}")
 
@@ -744,15 +799,26 @@ def nasdaq_get_economic_calendar_for_date(
     return _retry(_call, attempts=1, base_sleep_s=0.5, max_sleep_s=4.0, label="nasdaq_econ_fetch")
 
 
-def nasdaq_get_weekly_economic_calendar(anchor_date: date | None = None) -> list[dict[str, Any]]:
+def nasdaq_get_weekly_economic_calendar(anchor_date: date | None = None, *, limit: int | None = None) -> list[dict[str, Any]]:
     if anchor_date is None:
         anchor_date = get_logical_today()
 
     week_start = anchor_date - timedelta(days=anchor_date.weekday())
-    # Retrieve all 7 days of the week (Monday through Sunday)
-    days = [week_start + timedelta(days=i) for i in range(7)]
+    days = [week_start + timedelta(days=i) for i in range(5)]
 
     econ_events: list[dict[str, Any]] = []
+    if limit is not None and limit > 0:
+        priority_days = sorted(days, key=lambda d: (abs((d - anchor_date).days), d))
+        for d in priority_days:
+            try:
+                econ_events.extend(nasdaq_get_economic_calendar_for_date(d))
+            except Exception as e:
+                print(f"[nasdaq_econ_fetch] date={d.isoformat()} failed error={type(e).__name__}: {e}")
+                continue
+            if len(econ_events) >= limit:
+                return _select_economic_events(econ_events, limit=limit, anchor_date=anchor_date)
+        return _select_economic_events(econ_events, limit=limit, anchor_date=anchor_date)
+
     max_workers = max(1, min(len(days), int(os.getenv("CALENDAR_FETCH_WORKERS", "4"))))
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
         future_to_day = {
@@ -767,6 +833,30 @@ def nasdaq_get_weekly_economic_calendar(anchor_date: date | None = None) -> list
                 print(f"[nasdaq_econ_fetch] date={d.isoformat()} failed error={type(e).__name__}: {e}")
 
     return econ_events
+
+
+def _select_economic_events(
+    events: list[dict[str, Any]],
+    *,
+    limit: int,
+    anchor_date: date,
+) -> list[dict[str, Any]]:
+    today_iso = anchor_date.isoformat()
+    importance_rank = {"high": 0, "medium": 1, "low": 2}
+
+    def sort_key(item: dict[str, Any]) -> tuple[int, str, int, str]:
+        event_date = str(item.get("event_date") or "")
+        status = str(item.get("status") or "").strip().lower()
+        date_rank = 0 if event_date >= today_iso else 1
+        status_rank = 0 if status == "upcoming" else 1
+        return (
+            date_rank,
+            event_date,
+            importance_rank.get(str(item.get("importance") or "").lower(), 3),
+            str(item.get("event") or ""),
+        )
+
+    return sorted(events, key=sort_key)[:limit]
 
 
 def infer_economic_importance(event_name: str) -> str:

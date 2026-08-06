@@ -1,8 +1,11 @@
+from __future__ import annotations
+
 import os
 import re
 import json
 import queue
 import threading
+import concurrent.futures
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Optional
@@ -521,7 +524,7 @@ def calendar(
     if rate_limit_response is not None:
         return rate_limit_response
 
-    cache_key = f"calendar:v3:w{weeks}:k={kind or ''}:s={status or ''}:c={country or ''}:i={importance or ''}:t={ticker or ''}"
+    cache_key = f"calendar:v4:w{weeks}:k={kind or ''}:s={status or ''}:c={country or ''}:i={importance or ''}:t={ticker or ''}"
     cached_payload = _calendar_cache.get(cache_key)
     if cached_payload is not None:
         return cached_payload
@@ -536,10 +539,21 @@ def calendar(
 
     filter_cfg = _load_calendar_filter_config()
 
-    earnings_items = _fetch_earnings_items()
     earnings_cap = int(filter_cfg.get("earnings", 6) or 6)
-
-    economic_items = _load_economic_items_from_cron()
+    desired_total = int(filter_cfg.get("desired_total", 23) or 23)
+    fast_earnings_limit = earnings_cap if desired_total > 0 and ticker is None and status is None else None
+    economic_limit = None
+    if desired_total > 0 and kind is None and status is None and country is None and importance is None and ticker is None:
+        economic_limit = max(0, desired_total - earnings_cap)
+    if fast_earnings_limit is not None and economic_limit is not None:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+            earnings_future = executor.submit(_fetch_earnings_items, fast_earnings_limit)
+            economic_future = executor.submit(_load_economic_items_from_cron, economic_limit)
+            earnings_items = earnings_future.result()
+            economic_items = economic_future.result()
+    else:
+        earnings_items = _fetch_earnings_items(limit=fast_earnings_limit)
+        economic_items = _load_economic_items_from_cron(limit=economic_limit)
     merged = earnings_items + economic_items
 
     filtered = _filter_calendar_items(
@@ -554,7 +568,6 @@ def calendar(
     )
     filtered.sort(key=_calendar_sort_key)
 
-    desired_total = int(filter_cfg.get("desired_total", 23) or 23)
     if desired_total > 0:
         filtered = _cap_calendar_items(filtered, desired_total=desired_total, earnings_cap=earnings_cap)
 
@@ -958,7 +971,7 @@ def _save_metrics_to_history(ticker: str, form: str, schema: dict[str, Any]) -> 
         print("[history] save failed:", e)
 
 
-def _fetch_earnings_items() -> list[dict[str, Any]]:
+def _fetch_earnings_items(limit: int | None = None) -> list[dict[str, Any]]:
     """
     우선순위:
     1) cron 산출물(JSON) earnings
@@ -986,7 +999,7 @@ def _fetch_earnings_items() -> list[dict[str, Any]]:
 
     try:
         from backend.clients import get_weekly_earnings
-        payload = get_weekly_earnings() if get_weekly_earnings else []
+        payload = get_weekly_earnings(limit=limit, include_links=limit is None) if get_weekly_earnings else []
     except Exception as e:
         print(f"[calendar] earnings_fetch_failed error={type(e).__name__}: {e}")
         payload = _earnings_last_success or []
@@ -998,7 +1011,7 @@ def _fetch_earnings_items() -> list[dict[str, Any]]:
     return _normalize_earnings_items(payload)
 
 
-def _load_economic_items_from_cron() -> list[dict[str, Any]]:
+def _load_economic_items_from_cron(limit: int | None = None) -> list[dict[str, Any]]:
     direct_payload = _load_json_from_env_path("CRON_ECONOMIC_CALENDAR_PATH", "backend/data/economic_calendar.json")
     if isinstance(direct_payload, list) and direct_payload:
         return _normalize_economic_items(direct_payload)
@@ -1018,7 +1031,7 @@ def _load_economic_items_from_cron() -> list[dict[str, Any]]:
     print("[calendar] economic cron files not found, starting live economic fallback")
     try:
         from backend.clients import nasdaq_get_weekly_economic_calendar
-        live_econ = nasdaq_get_weekly_economic_calendar()
+        live_econ = nasdaq_get_weekly_economic_calendar(limit=limit)
         return _normalize_economic_items(live_econ)
     except Exception as e:
         print(f"[calendar] live economic fallback failed: {e}")
