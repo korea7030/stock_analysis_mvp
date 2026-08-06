@@ -173,6 +173,7 @@ export default function Dashboard() {
   const [upcomingPage, setUpcomingPage] = useState(1);
   const [reportedPage, setReportedPage] = useState(1);
   const [economicPage, setEconomicPage] = useState(1);
+  const [economicImportance, setEconomicImportance] = useState<"all" | "high" | "medium" | "low">("all");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [errorCode, setErrorCode] = useState<string | null>(null);
@@ -332,7 +333,11 @@ export default function Dashboard() {
       setEarningsLoading(true);
       setEarningsError(null);
       try {
-        const er = await fetch(`${baseUrl}/calendar?weeks=1`);
+        const params = new URLSearchParams({ weeks: "1" });
+        if (economicImportance !== "all") {
+          params.set("importance", economicImportance);
+        }
+        const er = await fetch(`${baseUrl}/calendar?${params.toString()}`);
         if (!er.ok) {
           throw new Error(`HTTP ${er.status}`);
         }
@@ -357,7 +362,7 @@ export default function Dashboard() {
     return () => {
       active = false;
     };
-  }, [apiBaseUrl]);
+  }, [apiBaseUrl, economicImportance]);
 
   const earnings = (calendar || []).filter((it) => (it.kind || "earnings").toLowerCase() === "earnings");
   const economic = (calendar || []).filter((it) => (it.kind || "").toLowerCase() === "economic");
@@ -394,6 +399,10 @@ export default function Dashboard() {
   useEffect(() => {
     setEconomicPage((p) => clampPage(p, economicTotalPages));
   }, [economicTotalPages]);
+
+  useEffect(() => {
+    setEconomicPage(1);
+  }, [economicImportance]);
 
   const upcomingPageItems = upcoming.slice(
     (upcomingPage - 1) * EARNINGS_PAGE_SIZE,
@@ -1187,38 +1196,40 @@ export default function Dashboard() {
                 <p className="text-sm text-slate-500 mt-3">이번 주 발표 예정/완료된 실적이 없습니다.</p>
               )}
 
-              {earnings.length > 0 && (
+              {!earningsLoading && !earningsError && (
                 <div className="mt-2 space-y-5">
 
-                  <div>
-                    <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">발표 예정</div>
-                    <div className="space-y-2">
-                      {upcomingPageItems.map((it, idx) => (
-                        <div key={`${it.ticker || "x"}-${idx}`} className="border rounded-lg p-3">
-                          <div className="flex items-center justify-between gap-2">
-                            <div className="font-semibold text-sm">{it.ticker || "-"}</div>
-                            <div className="text-xs text-slate-500">
-                              {(it.report_date || "-")} · {it.release_time || "TBD"}
+                  {upcoming.length > 0 && (
+                    <div>
+                      <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">발표 예정</div>
+                      <div className="space-y-2">
+                        {upcomingPageItems.map((it, idx) => (
+                          <div key={`${it.ticker || "x"}-${idx}`} className="border rounded-lg p-3">
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="font-semibold text-sm">{it.ticker || "-"}</div>
+                              <div className="text-xs text-slate-500">
+                                {(it.report_date || "-")} · {it.release_time || "TBD"}
+                              </div>
+                            </div>
+                            <div className="text-xs text-slate-500 mt-0.5 line-clamp-1">{it.company || "-"}</div>
+                            <div className="flex gap-3 mt-2 text-xs">
+                              {it.earnings_release_url && (
+                                <a className="text-blue-600 hover:underline" href={it.earnings_release_url} target="_blank" rel="noreferrer">
+                                  SEC 8-Ks
+                                </a>
+                              )}
+                              {it.transcript_search_url && (
+                                <a className="text-blue-600 hover:underline" href={it.transcript_search_url} target="_blank" rel="noreferrer">
+                                  Transcript
+                                </a>
+                              )}
                             </div>
                           </div>
-                          <div className="text-xs text-slate-500 mt-0.5 line-clamp-1">{it.company || "-"}</div>
-                          <div className="flex gap-3 mt-2 text-xs">
-                            {it.earnings_release_url && (
-                              <a className="text-blue-600 hover:underline" href={it.earnings_release_url} target="_blank" rel="noreferrer">
-                                SEC 8-Ks
-                              </a>
-                            )}
-                            {it.transcript_search_url && (
-                              <a className="text-blue-600 hover:underline" href={it.transcript_search_url} target="_blank" rel="noreferrer">
-                                Transcript
-                              </a>
-                            )}
-                          </div>
-                        </div>
-                      ))}
+                        ))}
+                      </div>
+                      <Pager page={upcomingPage} totalItems={upcoming.length} pageSize={EARNINGS_PAGE_SIZE} onChange={setUpcomingPage} />
                     </div>
-                    <Pager page={upcomingPage} totalItems={upcoming.length} pageSize={EARNINGS_PAGE_SIZE} onChange={setUpcomingPage} />
-                  </div>
+                  )}
 
 
                   {reported.length > 0 && (
@@ -1248,7 +1259,25 @@ export default function Dashboard() {
 
                   {economic.length > 0 && (
                     <div>
-                      <div className="text-xs font-semibold text-indigo-600 uppercase tracking-wide mb-2">경제지표</div>
+                      <div className="flex items-center justify-between gap-2 mb-2">
+                        <div className="text-xs font-semibold text-indigo-600 uppercase tracking-wide">경제지표</div>
+                        <div className="flex rounded-md border border-indigo-100 bg-white p-0.5">
+                          {(["all", "high", "medium", "low"] as const).map((level) => (
+                            <button
+                              key={level}
+                              type="button"
+                              className={`px-2 py-1 text-[11px] rounded ${
+                                economicImportance === level
+                                  ? "bg-indigo-600 text-white"
+                                  : "text-slate-500 hover:bg-indigo-50"
+                              }`}
+                              onClick={() => setEconomicImportance(level)}
+                            >
+                              {level === "all" ? "전체" : level}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
                       <div className="space-y-2">
                         {economicPageItems.map((it, idx) => (
                           <div key={`${it.event || "ev"}-${idx}`} className="border rounded-lg p-3 bg-indigo-50/40">
@@ -1260,18 +1289,19 @@ export default function Dashboard() {
                               {it.country || "US"} · {it.importance || "-"}
                               {it.release_time && ` · ${it.release_time}`}
                             </div>
-                            {(it.actual || it.consensus || it.previous) && (
-                              <div className="text-xs mt-2 grid grid-cols-3 gap-1 bg-white/70 p-2 rounded border border-indigo-100/50">
-                                <div className="text-slate-500">실제<br /><span className="font-semibold text-slate-800">{it.actual || "-"}</span></div>
-                                <div className="text-slate-500">예측<br /><span className="font-semibold text-slate-800">{it.consensus || "-"}</span></div>
-                                <div className="text-slate-500">이전<br /><span className="font-semibold text-slate-800">{it.previous || "-"}</span></div>
-                              </div>
-                            )}
+                            <div className="text-xs mt-2 grid grid-cols-3 gap-1 bg-white/70 p-2 rounded border border-indigo-100/50">
+                              <div className="text-slate-500">실제<br /><span className="font-semibold text-slate-800">{it.actual || "-"}</span></div>
+                              <div className="text-slate-500">예측<br /><span className="font-semibold text-slate-800">{it.consensus || "-"}</span></div>
+                              <div className="text-slate-500">이전<br /><span className="font-semibold text-slate-800">{it.previous || "-"}</span></div>
+                            </div>
                           </div>
                         ))}
                       </div>
                       <Pager page={economicPage} totalItems={economic.length} pageSize={EARNINGS_PAGE_SIZE} onChange={setEconomicPage} />
                     </div>
+                  )}
+                  {economic.length === 0 && (
+                    <p className="text-sm text-slate-500">표시할 경제지표가 없습니다.</p>
                   )}
                 </div>
               )}

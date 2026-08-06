@@ -57,10 +57,17 @@ T = TypeVar("T")
 
 def _limiter_acquire(limiter: Limiter, name: str) -> None:
     fn: Any = limiter.try_acquire
-    try:
-        fn(name, blocking=True)
-    except TypeError:
-        fn(name)
+    while True:
+        try:
+            try:
+                fn(name, blocking=True)
+            except TypeError:
+                fn(name)
+            return
+        except Exception as e:
+            if type(e).__name__ != "BucketFullException":
+                raise
+            time.sleep(0.25)
 
 
 class HttpStatusError(RuntimeError):
@@ -560,6 +567,8 @@ def nasdaq_get_earnings_for_date(
 
             eps_estimate = row.get("epsForecast")
             eps_actual = row.get("eps")
+            revenue_estimate = row.get("revenueForecast") or row.get("revenueEstimate") or row.get("revenueForecastFormatted")
+            revenue_actual = row.get("revenue") or row.get("revenueActual") or row.get("reportedRevenue")
 
             time_code = row.get("time")
             status = _nasdaq_status(
@@ -579,8 +588,8 @@ def nasdaq_get_earnings_for_date(
                     "release_time": _nasdaq_time_label(str(time_code) if time_code is not None else None),
                     "eps_estimate": str(eps_estimate).strip() if not _is_missing_text(eps_estimate) else None,
                     "eps_actual": str(eps_actual).strip() if not _is_missing_text(eps_actual) else None,
-                    "revenue_estimate": None,
-                    "revenue_actual": None,
+                    "revenue_estimate": str(revenue_estimate).strip() if not _is_missing_text(revenue_estimate) else None,
+                    "revenue_actual": str(revenue_actual).strip() if not _is_missing_text(revenue_actual) else None,
                     "status": status,
                     "report_date": date_str,
                     "earnings_release_url": earnings_release_url,
@@ -614,12 +623,18 @@ def nasdaq_get_weekly_earnings(anchor_date: date | None = None) -> list[dict[str
         now_et = None
 
     earnings: list[dict[str, Any]] = []
-    for d in days:
-        try:
-            earnings.extend(nasdaq_get_earnings_for_date(d, today=anchor_date, now_et=now_et))
-        except Exception as e:
-            print(f"[nasdaq_fetch] date={d.isoformat()} failed error={type(e).__name__}: {e}")
-            continue
+    max_workers = max(1, min(len(days), int(os.getenv("CALENDAR_FETCH_WORKERS", "4"))))
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_to_day = {
+            executor.submit(nasdaq_get_earnings_for_date, d, today=anchor_date, now_et=now_et): d
+            for d in days
+        }
+        for future in concurrent.futures.as_completed(future_to_day):
+            d = future_to_day[future]
+            try:
+                earnings.extend(future.result())
+            except Exception as e:
+                print(f"[nasdaq_fetch] date={d.isoformat()} failed error={type(e).__name__}: {e}")
 
     return earnings
 
@@ -658,8 +673,12 @@ def get_weekly_earnings() -> list[dict[str, Any]]:
                         existing["status"] = "reported"
                     if item.get("eps_actual") and not existing.get("eps_actual"):
                         existing["eps_actual"] = item.get("eps_actual")
+                    if item.get("eps_estimate") and not existing.get("eps_estimate"):
+                        existing["eps_estimate"] = item.get("eps_estimate")
                     if item.get("revenue_actual") and not existing.get("revenue_actual"):
                         existing["revenue_actual"] = item.get("revenue_actual")
+                    if item.get("revenue_estimate") and not existing.get("revenue_estimate"):
+                        existing["revenue_estimate"] = item.get("revenue_estimate")
                     break
         else:
             if ticker:
@@ -705,16 +724,20 @@ def nasdaq_get_economic_calendar_for_date(
 
             gmt_time = str(row.get("gmt") or "").strip()
             kst_date_str, kst_time_str = convert_et_to_kst(date_str, gmt_time)
+            actual = str(row.get("actual") or "").strip() if not _is_missing_text(row.get("actual")) else None
+            consensus = str(row.get("consensus") or "").strip() if not _is_missing_text(row.get("consensus")) else None
+            previous = str(row.get("previous") or "").strip() if not _is_missing_text(row.get("previous")) else None
 
             out.append({
                 "event": str(event_name).strip(),
                 "event_date": kst_date_str,
                 "country": country,
-                "importance": "medium",
-                "actual": str(row.get("actual") or "").strip() if not _is_missing_text(row.get("actual")) else None,
-                "consensus": str(row.get("consensus") or "").strip() if not _is_missing_text(row.get("consensus")) else None,
-                "previous": str(row.get("previous") or "").strip() if not _is_missing_text(row.get("previous")) else None,
+                "importance": infer_economic_importance(str(event_name).strip()),
+                "actual": actual,
+                "consensus": consensus,
+                "previous": previous,
                 "release_time": kst_time_str,
+                "status": "reported" if actual else "upcoming",
             })
         return out
 
@@ -730,11 +753,52 @@ def nasdaq_get_weekly_economic_calendar(anchor_date: date | None = None) -> list
     days = [week_start + timedelta(days=i) for i in range(7)]
 
     econ_events: list[dict[str, Any]] = []
-    for d in days:
-        try:
-            econ_events.extend(nasdaq_get_economic_calendar_for_date(d))
-        except Exception as e:
-            print(f"[nasdaq_econ_fetch] date={d.isoformat()} failed error={type(e).__name__}: {e}")
-            continue
+    max_workers = max(1, min(len(days), int(os.getenv("CALENDAR_FETCH_WORKERS", "4"))))
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_to_day = {
+            executor.submit(nasdaq_get_economic_calendar_for_date, d): d
+            for d in days
+        }
+        for future in concurrent.futures.as_completed(future_to_day):
+            d = future_to_day[future]
+            try:
+                econ_events.extend(future.result())
+            except Exception as e:
+                print(f"[nasdaq_econ_fetch] date={d.isoformat()} failed error={type(e).__name__}: {e}")
 
     return econ_events
+
+
+def infer_economic_importance(event_name: str) -> str:
+    name = event_name.lower()
+    high_keywords = [
+        "nonfarm",
+        "payroll",
+        "unemployment rate",
+        "cpi",
+        "consumer price",
+        "pce",
+        "fed interest rate",
+        "fomc",
+        "interest rate decision",
+        "gdp",
+        "gross domestic product",
+        "retail sales",
+        "ism manufacturing",
+        "ism services",
+        "pmi",
+        "jolts",
+    ]
+    low_keywords = [
+        "bill auction",
+        "note auction",
+        "bond auction",
+        "redbook",
+        "mba",
+        "api weekly",
+    ]
+    if any(keyword in name for keyword in high_keywords):
+        return "high"
+    if any(keyword in name for keyword in low_keywords):
+        return "low"
+    return "medium"

@@ -521,7 +521,7 @@ def calendar(
     if rate_limit_response is not None:
         return rate_limit_response
 
-    cache_key = f"calendar:v2:w{weeks}:k={kind or ''}:s={status or ''}:c={country or ''}:i={importance or ''}:t={ticker or ''}"
+    cache_key = f"calendar:v3:w{weeks}:k={kind or ''}:s={status or ''}:c={country or ''}:i={importance or ''}:t={ticker or ''}"
     cached_payload = _calendar_cache.get(cache_key)
     if cached_payload is not None:
         return cached_payload
@@ -538,7 +538,6 @@ def calendar(
 
     earnings_items = _fetch_earnings_items()
     earnings_cap = int(filter_cfg.get("earnings", 6) or 6)
-    earnings_items = earnings_items[:earnings_cap]
 
     economic_items = _load_economic_items_from_cron()
     merged = earnings_items + economic_items
@@ -1054,11 +1053,40 @@ def _date_from_iso_start(value: str) -> str:
 
 def _infer_importance(summary: str) -> str:
     s = summary.lower()
-    if "major" in s:
-        return "major"
-    if "minor" in s:
-        return "minor"
+    if "high" in s or "major" in s:
+        return "high"
+    if "low" in s or "minor" in s:
+        return "low"
+    high_keywords = [
+        "nonfarm",
+        "payroll",
+        "unemployment rate",
+        "cpi",
+        "consumer price",
+        "pce",
+        "fomc",
+        "interest rate",
+        "gdp",
+        "retail sales",
+        "ism",
+        "pmi",
+        "jolts",
+    ]
+    low_keywords = ["auction", "redbook", "mba"]
+    if any(keyword in s for keyword in high_keywords):
+        return "high"
+    if any(keyword in s for keyword in low_keywords):
+        return "low"
     return "medium"
+
+
+def _clean_optional_text(value: Any) -> str | None:
+    if value is None:
+        return None
+    cleaned = str(value).strip()
+    if cleaned in {"", "-", "—", "N/A", "n/a", "null", "None"}:
+        return None
+    return cleaned
 
 
 def _normalize_economic_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -1068,6 +1096,9 @@ def _normalize_economic_items(items: list[dict[str, Any]]) -> list[dict[str, Any
             continue
         summary = str(row.get("summary") or row.get("event") or row.get("title") or "Economic Event")
         start = str(row.get("start") or "")
+        actual = _clean_optional_text(row.get("actual"))
+        consensus = _clean_optional_text(row.get("consensus") or row.get("forecast"))
+        previous = _clean_optional_text(row.get("previous"))
         out.append(
             {
                 **row,
@@ -1077,9 +1108,10 @@ def _normalize_economic_items(items: list[dict[str, Any]]) -> list[dict[str, Any
                 "country": row.get("country") or "US",
                 "importance": row.get("importance") or _infer_importance(summary),
                 "start": start or row.get("start_time"),
-                "consensus": row.get("consensus"),
-                "previous": row.get("previous"),
-                "actual": row.get("actual"),
+                "consensus": consensus,
+                "previous": previous,
+                "actual": actual,
+                "status": row.get("status") or ("reported" if actual else "upcoming"),
             }
         )
     return out
@@ -1101,6 +1133,9 @@ def _normalize_earnings_items(items: list[dict[str, Any]]) -> list[dict[str, Any
                 "event_date": row.get("event_date") or row.get("report_date") or _date_from_iso_start(start),
                 "release_time": row.get("report_time") or row.get("release_time"),
                 "eps_estimate": row.get("eps_forecast") or row.get("eps_estimate"),
+                "eps_actual": row.get("eps_actual"),
+                "revenue_estimate": row.get("revenue_forecast") or row.get("revenue_estimate"),
+                "revenue_actual": row.get("revenue_actual"),
                 "event": "Earnings",
             }
         )
@@ -1176,6 +1211,23 @@ def _parse_csv_values(value: Optional[str]) -> set[str]:
     return {v.strip().lower() for v in value.split(",") if v.strip()}
 
 
+def _importance_aliases(values: set[str]) -> set[str]:
+    out = set(values)
+    if "major" in values or "3" in values:
+        out.add("high")
+    if "normal" in values or "2" in values:
+        out.add("medium")
+    if "minor" in values or "1" in values:
+        out.add("low")
+    if "high" in values:
+        out.update({"major", "3"})
+    if "medium" in values:
+        out.update({"normal", "2"})
+    if "low" in values:
+        out.update({"minor", "1"})
+    return out
+
+
 def _filter_calendar_items(
     items: list[dict[str, Any]],
     *,
@@ -1190,7 +1242,7 @@ def _filter_calendar_items(
     kinds = _parse_csv_values(kind)
     statuses = _parse_csv_values(status)
     countries = _parse_csv_values(country)
-    importances = _parse_csv_values(importance)
+    importances = _importance_aliases(_parse_csv_values(importance))
     tickers = _parse_csv_values(ticker)
 
     out: list[dict[str, Any]] = []
@@ -1216,7 +1268,7 @@ def _filter_calendar_items(
             continue
         if countries and item_country not in countries:
             continue
-        if importances and item_importance not in importances:
+        if importances and item_kind == "economic" and item_importance not in importances:
             continue
         if tickers and item_ticker not in tickers:
             continue

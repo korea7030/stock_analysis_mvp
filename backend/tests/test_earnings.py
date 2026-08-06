@@ -59,6 +59,8 @@ def test_nasdaq_get_earnings_for_date_reported(monkeypatch):
                             "time": "time-after-hours",
                             "epsForecast": "$1.23",
                             "eps": "$1.30",
+                            "revenueForecast": "$2.40B",
+                            "revenue": "$2.55B",
                             "surprise": "5.69%",
                         }
                     ]
@@ -76,6 +78,8 @@ def test_nasdaq_get_earnings_for_date_reported(monkeypatch):
     assert it["release_time"] == "After Hours"
     assert it["eps_estimate"] == "$1.23"
     assert it["eps_actual"] == "$1.30"
+    assert it["revenue_estimate"] == "$2.40B"
+    assert it["revenue_actual"] == "$2.55B"
     assert it["status"] == "reported"
     assert it["report_date"] == "2026-03-11"
     assert it["source"] == "nasdaq"
@@ -118,6 +122,68 @@ def test_nasdaq_get_earnings_for_date_upcoming(monkeypatch):
     assert it["last_year_report_date"] == "3/12/2025"
     assert it["last_year_eps"] == "$0.42"
     assert it["transcript_search_url"] == "https://seekingalpha.com/symbol/EFGH/earnings/transcripts"
+
+
+def test_weekly_earnings_merges_marketbeat_revenue_estimate(monkeypatch):
+    nasdaq_item = {
+        "ticker": "ABCD",
+        "company": "ABCD Corp",
+        "eps_estimate": "$1.23",
+        "eps_actual": "$1.30",
+        "revenue_estimate": None,
+        "revenue_actual": None,
+        "status": "reported",
+    }
+    marketbeat_item = {
+        "ticker": "ABCD",
+        "revenue_estimate": "$2.40B",
+        "revenue_actual": "$2.55B",
+        "eps_estimate": "$1.20",
+        "eps_actual": "$1.30",
+        "status": "reported",
+    }
+
+    monkeypatch.setattr(clients, "nasdaq_get_weekly_earnings", lambda: [dict(nasdaq_item)])
+    monkeypatch.setattr(clients, "marketbeat_get_weekly_earnings", lambda: [dict(marketbeat_item)])
+
+    items = clients.get_weekly_earnings()
+    assert len(items) == 1
+    assert items[0]["revenue_estimate"] == "$2.40B"
+    assert items[0]["revenue_actual"] == "$2.55B"
+
+
+def test_nasdaq_economic_calendar_sets_status_and_importance(monkeypatch):
+    monkeypatch.setattr(clients, "_limiter_acquire", lambda *_args, **_kwargs: None)
+
+    def _fake_get(_url, *, headers, timeout):
+        assert "User-Agent" in headers
+        assert timeout
+        return _FakeResponse(
+            status_code=200,
+            payload={
+                "data": {
+                    "rows": [
+                        {
+                            "gmt": "08:30",
+                            "country": "United States",
+                            "eventName": "Consumer Price Index",
+                            "actual": " ",
+                            "consensus": "0.2%",
+                            "previous": "0.1%",
+                        }
+                    ]
+                }
+            },
+        )
+
+    monkeypatch.setattr(clients.requests, "get", _fake_get)
+
+    items = clients.nasdaq_get_economic_calendar_for_date(date(2026, 3, 12))
+    assert len(items) == 1
+    assert items[0]["status"] == "upcoming"
+    assert items[0]["importance"] == "high"
+    assert items[0]["actual"] is None
+    assert items[0]["consensus"] == "0.2%"
 
 
 def test_seekingalpha_transcripts_url_preserves_colon():
