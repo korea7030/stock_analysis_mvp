@@ -614,6 +614,117 @@ export default function Dashboard() {
     chartData !== null &&
     chartData.some((d) => d.current !== 0 || d.previous !== 0);
 
+  const researchGuideSection = (
+    <section className="py-4 sm:py-6 space-y-6" aria-labelledby="research-guide-title">
+      <div className="max-w-3xl">
+        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Research guide</p>
+        <h2 id="research-guide-title" className="mt-2 text-2xl font-semibold tracking-tight text-slate-900">
+          SEC 공시를 읽기 위한 기본 분석 흐름
+        </h2>
+        <p className="mt-3 text-sm leading-6 text-slate-600">
+          SEC Filing Dashboard는 기업이 제출한 공식 보고서와 실적 일정을 바탕으로 투자자가 직접 검토할
+          항목을 정리합니다. 특정 종목의 매수나 매도를 권유하지 않으며, 자동 추출된 수치는 원문 공시와
+          회사 발표 자료를 함께 대조하는 것을 전제로 합니다.
+        </p>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        {researchTopics.map((topic) => (
+          <article key={topic.title} className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm">
+            <h3 className="text-base font-semibold text-slate-900">{topic.title}</h3>
+            <p className="mt-2 text-sm leading-6 text-slate-600">{topic.body}</p>
+          </article>
+        ))}
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        <section className="lg:col-span-5 bg-white rounded-xl border border-slate-200 p-5 shadow-sm" aria-labelledby="filing-checklist-title">
+          <h3 id="filing-checklist-title" className="text-lg font-semibold text-slate-900">
+            공시 분석 체크리스트
+          </h3>
+          <ul className="mt-3 space-y-3 text-sm leading-6 text-slate-600">
+            {filingChecklist.map((item) => (
+              <li key={item} className="flex gap-2">
+                <span className="mt-2 h-1.5 w-1.5 rounded-full bg-slate-400 shrink-0" aria-hidden="true" />
+                <span>{item}</span>
+              </li>
+            ))}
+          </ul>
+        </section>
+
+        <section className="lg:col-span-7 bg-white rounded-xl border border-slate-200 p-5 shadow-sm" aria-labelledby="stock-research-title">
+          <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-2">
+            <div>
+              <h3 id="stock-research-title" className="text-lg font-semibold text-slate-900">
+                종목별 공시 리서치 페이지
+              </h3>
+              <p className="mt-1 text-sm text-slate-600">
+                주요 미국 기업의 공시 관찰 포인트와 분석 도구 바로가기를 제공합니다.
+              </p>
+            </div>
+            <Link href="/stocks" className="text-sm font-medium text-blue-700 hover:underline">
+              전체 종목 보기
+            </Link>
+          </div>
+          <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {stockProfiles.slice(0, 6).map((stock) => (
+              <Link
+                key={stock.ticker}
+                href={stockPath(stock.ticker)}
+                className="block rounded-lg border border-slate-200 p-3 hover:border-blue-300 hover:bg-blue-50/40 transition-colors"
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <span className="font-semibold text-slate-900">{stock.ticker}</span>
+                  <span className="text-xs text-slate-500">{stock.sector}</span>
+                </div>
+                <p className="mt-1 text-sm text-slate-700">{stock.name}</p>
+              </Link>
+            ))}
+          </div>
+        </section>
+      </div>
+
+      <section className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm" aria-labelledby="filing-guides-title">
+        <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-2">
+          <div>
+            <h3 id="filing-guides-title" className="text-lg font-semibold text-slate-900">
+              SEC 공시 해설 가이드
+            </h3>
+            <p className="mt-1 text-sm text-slate-600">
+              자동 분석 결과를 원문 공시와 대조할 때 필요한 보고서 유형, 재무제표, 실적 발표 자료 해석법입니다.
+            </p>
+          </div>
+          <Link href="/guides" className="text-sm font-medium text-blue-700 hover:underline">
+            전체 가이드 보기
+          </Link>
+        </div>
+        <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3">
+          {guideArticles.map((article) => (
+            <Link
+              key={article.slug}
+              href={guidePath(article.slug)}
+              className="block rounded-lg border border-slate-200 p-3 hover:border-blue-300 hover:bg-blue-50/40 transition-colors"
+            >
+              <p className="text-xs text-slate-500">{article.readingTime}</p>
+              <h4 className="mt-1 text-sm font-semibold leading-5 text-slate-900">{article.title}</h4>
+              <p className="mt-2 line-clamp-3 text-xs leading-5 text-slate-600">{article.description}</p>
+            </Link>
+          ))}
+        </div>
+      </section>
+
+      <section className="bg-slate-900 text-white rounded-xl p-5 sm:p-6" aria-labelledby="source-note-title">
+        <h3 id="source-note-title" className="text-lg font-semibold">데이터 출처와 이용 범위</h3>
+        <p className="mt-2 text-sm leading-6 text-slate-200">
+          공시 데이터는 SEC EDGAR에 공개된 기업 보고서를 기반으로 분석하며, 실적 일정과 경제지표는 외부
+          데이터 제공처의 업데이트 상태에 따라 지연되거나 수정될 수 있습니다. 화면의 숫자와 요약은 정보
+          탐색을 돕기 위한 참고 자료이며, 최종 투자 판단은 공식 원문, 회사 IR 자료, 회계 주석, 본인의
+          투자 기준을 함께 검토해 내려야 합니다.
+        </p>
+      </section>
+    </section>
+  );
+
   return (
     <div className="min-h-screen bg-gradient-to-b from-slate-50 via-white to-slate-50">
       <div className="max-w-7xl mx-auto p-4 sm:p-6 space-y-4 sm:space-y-6">
@@ -626,6 +737,7 @@ export default function Dashboard() {
           </p>
         </div>
 
+        {researchGuideSection}
 
         <div className="bg-white rounded-xl shadow p-4">
           <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center">
@@ -1310,114 +1422,6 @@ export default function Dashboard() {
           </div>
 
         </div>
-        <section className="py-4 sm:py-6 space-y-6" aria-labelledby="research-guide-title">
-          <div className="max-w-3xl">
-            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Research guide</p>
-            <h2 id="research-guide-title" className="mt-2 text-2xl font-semibold tracking-tight text-slate-900">
-              SEC 공시를 읽기 위한 기본 분석 흐름
-            </h2>
-            <p className="mt-3 text-sm leading-6 text-slate-600">
-              SEC Filing Dashboard는 기업이 제출한 공식 보고서와 실적 일정을 바탕으로 투자자가 직접 검토할
-              항목을 정리합니다. 특정 종목의 매수나 매도를 권유하지 않으며, 자동 추출된 수치는 원문 공시와
-              회사 발표 자료를 함께 대조하는 것을 전제로 합니다.
-            </p>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            {researchTopics.map((topic) => (
-              <article key={topic.title} className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm">
-                <h3 className="text-base font-semibold text-slate-900">{topic.title}</h3>
-                <p className="mt-2 text-sm leading-6 text-slate-600">{topic.body}</p>
-              </article>
-            ))}
-          </div>
-
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-            <section className="lg:col-span-5 bg-white rounded-xl border border-slate-200 p-5 shadow-sm" aria-labelledby="filing-checklist-title">
-              <h3 id="filing-checklist-title" className="text-lg font-semibold text-slate-900">
-                공시 분석 체크리스트
-              </h3>
-              <ul className="mt-3 space-y-3 text-sm leading-6 text-slate-600">
-                {filingChecklist.map((item) => (
-                  <li key={item} className="flex gap-2">
-                    <span className="mt-2 h-1.5 w-1.5 rounded-full bg-slate-400 shrink-0" aria-hidden="true" />
-                    <span>{item}</span>
-                  </li>
-                ))}
-              </ul>
-            </section>
-
-            <section className="lg:col-span-7 bg-white rounded-xl border border-slate-200 p-5 shadow-sm" aria-labelledby="stock-research-title">
-              <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-2">
-                <div>
-                  <h3 id="stock-research-title" className="text-lg font-semibold text-slate-900">
-                    종목별 공시 리서치 페이지
-                  </h3>
-                  <p className="mt-1 text-sm text-slate-600">
-                    주요 미국 기업의 공시 관찰 포인트와 분석 도구 바로가기를 제공합니다.
-                  </p>
-                </div>
-                <Link href="/stocks" className="text-sm font-medium text-blue-700 hover:underline">
-                  전체 종목 보기
-                </Link>
-              </div>
-              <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {stockProfiles.slice(0, 6).map((stock) => (
-                  <Link
-                    key={stock.ticker}
-                    href={stockPath(stock.ticker)}
-                    className="block rounded-lg border border-slate-200 p-3 hover:border-blue-300 hover:bg-blue-50/40 transition-colors"
-                  >
-                    <div className="flex items-center justify-between gap-3">
-                      <span className="font-semibold text-slate-900">{stock.ticker}</span>
-                      <span className="text-xs text-slate-500">{stock.sector}</span>
-                    </div>
-                    <p className="mt-1 text-sm text-slate-700">{stock.name}</p>
-                  </Link>
-                ))}
-              </div>
-            </section>
-          </div>
-
-          <section className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm" aria-labelledby="filing-guides-title">
-            <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-2">
-              <div>
-                <h3 id="filing-guides-title" className="text-lg font-semibold text-slate-900">
-                  SEC 공시 해설 가이드
-                </h3>
-                <p className="mt-1 text-sm text-slate-600">
-                  자동 분석 결과를 원문 공시와 대조할 때 필요한 보고서 유형, 재무제표, 실적 발표 자료 해석법입니다.
-                </p>
-              </div>
-              <Link href="/guides" className="text-sm font-medium text-blue-700 hover:underline">
-                전체 가이드 보기
-              </Link>
-            </div>
-            <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3">
-              {guideArticles.map((article) => (
-                <Link
-                  key={article.slug}
-                  href={guidePath(article.slug)}
-                  className="block rounded-lg border border-slate-200 p-3 hover:border-blue-300 hover:bg-blue-50/40 transition-colors"
-                >
-                  <p className="text-xs text-slate-500">{article.readingTime}</p>
-                  <h4 className="mt-1 text-sm font-semibold leading-5 text-slate-900">{article.title}</h4>
-                  <p className="mt-2 line-clamp-3 text-xs leading-5 text-slate-600">{article.description}</p>
-                </Link>
-              ))}
-            </div>
-          </section>
-
-          <section className="bg-slate-900 text-white rounded-xl p-5 sm:p-6" aria-labelledby="source-note-title">
-            <h3 id="source-note-title" className="text-lg font-semibold">데이터 출처와 이용 범위</h3>
-            <p className="mt-2 text-sm leading-6 text-slate-200">
-              공시 데이터는 SEC EDGAR에 공개된 기업 보고서를 기반으로 분석하며, 실적 일정과 경제지표는 외부
-              데이터 제공처의 업데이트 상태에 따라 지연되거나 수정될 수 있습니다. 화면의 숫자와 요약은 정보
-              탐색을 돕기 위한 참고 자료이며, 최종 투자 판단은 공식 원문, 회사 IR 자료, 회계 주석, 본인의
-              투자 기준을 함께 검토해 내려야 합니다.
-            </p>
-          </section>
-        </section>
       </div>
     </div>
   );
