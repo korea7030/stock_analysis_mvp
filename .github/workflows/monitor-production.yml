@@ -1,0 +1,183 @@
+name: Monitor Production
+
+on:
+  workflow_dispatch:
+    inputs:
+      site_url:
+        description: "Production frontend URL"
+        required: false
+        default: "https://finnblog.pe.kr"
+      api_base_url:
+        description: "Production backend API base URL"
+        required: false
+        default: "https://stock-backend-api-344913823090.us-central1.run.app"
+  schedule:
+    - cron: "*/30 * * * *"
+
+env:
+  SITE_URL: ${{ inputs.site_url || vars.PRODUCTION_SITE_URL || 'https://finnblog.pe.kr' }}
+  API_BASE_URL: ${{ inputs.api_base_url || vars.PRODUCTION_API_BASE_URL || 'https://stock-backend-api-344913823090.us-central1.run.app' }}
+  SMOKE_TICKER: ${{ vars.MONITOR_SMOKE_TICKER || 'AAPL' }}
+  SMOKE_FORM: ${{ vars.MONITOR_SMOKE_FORM || '10-Q' }}
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run production smoke checks
+        id: smoke
+        shell: bash
+        run: |
+          set +e
+
+          SUMMARY_FILE="monitor-summary.md"
+          : > "$SUMMARY_FILE"
+
+          fail_count=0
+
+          add_line() {
+            printf '%s\n' "$1" | tee -a "$SUMMARY_FILE"
+          }
+
+          check_url() {
+            local name="$1"
+            local url="$2"
+            local timeout_s="$3"
+            local expected="${4:-}"
+
+            local body_file
+            body_file="$(mktemp)"
+            local start_ms
+            start_ms="$(date +%s%3N)"
+
+            local http_code
+            http_code="$(curl \
+              --silent \
+              --show-error \
+              --location \
+              --max-time "$timeout_s" \
+              --connect-timeout 10 \
+              --output "$body_file" \
+              --write-out '%{http_code}' \
+              "$url" 2>> "$SUMMARY_FILE")"
+            local curl_status=$?
+
+            local end_ms
+            end_ms="$(date +%s%3N)"
+            local elapsed_ms=$((end_ms - start_ms))
+
+            if [ "$curl_status" -ne 0 ]; then
+              add_line "- ❌ ${name}: curl failed status=${curl_status} elapsed=${elapsed_ms}ms url=${url}"
+              fail_count=$((fail_count + 1))
+              rm -f "$body_file"
+              return
+            fi
+
+            if [ "$http_code" -lt 200 ] || [ "$http_code" -ge 300 ]; then
+              add_line "- ❌ ${name}: HTTP ${http_code} elapsed=${elapsed_ms}ms url=${url}"
+              add_line "  body: $(head -c 300 "$body_file" | tr '\n' ' ')"
+              fail_count=$((fail_count + 1))
+              rm -f "$body_file"
+              return
+            fi
+
+            if [ -n "$expected" ] && ! grep -Fq "$expected" "$body_file"; then
+              add_line "- ❌ ${name}: expected text not found (${expected}) elapsed=${elapsed_ms}ms url=${url}"
+              add_line "  body: $(head -c 300 "$body_file" | tr '\n' ' ')"
+              fail_count=$((fail_count + 1))
+              rm -f "$body_file"
+              return
+            fi
+
+            add_line "- ✅ ${name}: HTTP ${http_code} elapsed=${elapsed_ms}ms"
+            rm -f "$body_file"
+          }
+
+          add_line "# Production monitor"
+          add_line ""
+          add_line "- Site: ${SITE_URL}"
+          add_line "- API: ${API_BASE_URL}"
+          add_line "- Smoke ticker/form: ${SMOKE_TICKER}/${SMOKE_FORM}"
+          add_line "- Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          add_line ""
+          add_line "## Checks"
+
+          check_url "frontend home" "${SITE_URL}/" 20 "SEC Filing Dashboard"
+          check_url "frontend sitemap" "${SITE_URL}/sitemap.xml" 20 "<urlset"
+          check_url "backend health" "${API_BASE_URL}/health" 15 '"status":"ok"'
+          check_url "backend calendar" "${API_BASE_URL}/calendar?weeks=1&kind=all" 45
+          check_url "backend analyze smoke" "${API_BASE_URL}/analyze?ticker=${SMOKE_TICKER}&form=${SMOKE_FORM}" 120 '"ticker"'
+
+          add_line ""
+          if [ "$fail_count" -gt 0 ]; then
+            add_line "Result: ${fail_count} production smoke check(s) failed."
+            exit 1
+          fi
+
+          add_line "Result: all production smoke checks passed."
+
+      - name: Upload monitor summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-monitor-summary
+          path: monitor-summary.md
+          if-no-files-found: error
+
+      - name: Create or update production alert issue
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require("fs");
+            const title = "[prod-alert] Production smoke checks failed";
+            const label = "production-monitor";
+            const body = fs.readFileSync("monitor-summary.md", "utf8");
+            const { owner, repo } = context.repo;
+
+            try {
+              await github.rest.issues.createLabel({
+                owner,
+                repo,
+                name: label,
+                color: "B60205",
+                description: "Production smoke check failures",
+              });
+            } catch (error) {
+              if (error.status !== 422) throw error;
+            }
+
+            const existing = await github.rest.issues.listForRepo({
+              owner,
+              repo,
+              state: "open",
+              labels: label,
+              per_page: 20,
+            });
+
+            const issue = existing.data.find((item) => item.title === title && !item.pull_request);
+            if (issue) {
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number: issue.number,
+                body,
+              });
+              return;
+            }
+
+            await github.rest.issues.create({
+              owner,
+              repo,
+              title,
+              body,
+              labels: [label],
+            });
