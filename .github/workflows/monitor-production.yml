@@ -1,6 +1,6 @@
 name: Monitor Production
 
-on:
+"on":
   workflow_dispatch:
     inputs:
       site_url:
@@ -15,8 +15,8 @@ on:
     - cron: "*/30 * * * *"
 
 env:
-  SITE_URL: ${{ inputs.site_url || vars.PRODUCTION_SITE_URL || 'https://finnblog.pe.kr' }}
-  API_BASE_URL: ${{ inputs.api_base_url || vars.PRODUCTION_API_BASE_URL || 'https://stock-backend-api-344913823090.us-central1.run.app' }}
+  SITE_URL: ${{ github.event.inputs.site_url || vars.PRODUCTION_SITE_URL || 'https://finnblog.pe.kr' }}
+  API_BASE_URL: ${{ github.event.inputs.api_base_url || vars.PRODUCTION_API_BASE_URL || 'https://stock-backend-api-344913823090.us-central1.run.app' }}
   SMOKE_TICKER: ${{ vars.MONITOR_SMOKE_TICKER || 'AAPL' }}
   SMOKE_FORM: ${{ vars.MONITOR_SMOKE_FORM || '10-Q' }}
 
