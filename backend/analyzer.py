@@ -136,6 +136,49 @@ def annotate_income_html(income_html: str) -> str:
     year_order = _infer_year_order(soup)
     ascending = len(year_order) >= 2 and year_order[0] < year_order[1]
 
+    def is_expense_like_row(tr) -> bool:
+        label = ""
+        for cell in tr.find_all(["td", "th"]):
+            text = cell.get_text(" ", strip=True).replace("\xa0", " ")
+            if text and parse_number(text) is None:
+                label = text
+                break
+        normalized = " ".join(label.lower().split())
+        if not normalized:
+            return False
+        if re.search(r"\bother income\s*\(expense\)", normalized):
+            return False
+        if re.search(r"\bincome\s*\(loss\)", normalized):
+            return False
+        if re.search(r"\bincome\s*\(expense\)", normalized):
+            return False
+        return any(
+            keyword in normalized
+            for keyword in [
+                "cost of",
+                "cost of sales",
+                "total cost",
+                "expense",
+                "expenses",
+                "research and development",
+                "selling, general",
+                "general and administrative",
+                "marketing, general",
+                "amortization",
+                "depreciation",
+                "income tax provision",
+                "provision for income taxes",
+                "tax provision",
+            ]
+        )
+
+    def expense_direction(current: float, previous: float) -> float:
+        current_magnitude = abs(current)
+        previous_magnitude = abs(previous)
+        if current_magnitude == previous_magnitude:
+            return 0.0
+        return previous_magnitude - current_magnitude
+
     for tr in soup.find_all("tr"):
         tds = tr.find_all("td")
         if not tds:
@@ -167,7 +210,9 @@ def annotate_income_html(income_html: str) -> str:
             (td_9m_curr, v9c) = numeric_cells[2]
             (_, v9p) = numeric_cells[3]
 
-        def make_badge(pct):
+        expense_like = is_expense_like_row(tr)
+
+        def make_badge(pct, direction=None):
             span = soup.new_tag("span")
 
             existing = span.get("class")
@@ -191,20 +236,23 @@ def annotate_income_html(income_html: str) -> str:
                 span["class"] = class_str
                 span.string = "N/A"
                 return span
-            arrow = "▲" if pct > 0 else "▼" if pct < 0 else "•"
-            add_class("delta-up" if pct > 0 else "delta-down" if pct < 0 else "delta-flat")
+            direction = pct if direction is None else direction
+            arrow = "▲" if direction > 0 else "▼" if direction < 0 else "•"
+            add_class("delta-up" if direction > 0 else "delta-down" if direction < 0 else "delta-flat")
             span["class"] = class_str
             span.string = f"{arrow} {pct:+.1f}%"
             return span
 
         pc3 = pct_change(v3c, v3p)
         pc9 = pct_change(v9c, v9p)
+        direction_3m = expense_direction(v3c, v3p) if expense_like else pc3
+        direction_9m = expense_direction(v9c, v9p) if expense_like else pc9
 
         td_3m_curr.append(" ")
-        td_3m_curr.append(make_badge(pc3))
+        td_3m_curr.append(make_badge(pc3, direction_3m))
 
         td_9m_curr.append(" ")
-        td_9m_curr.append(make_badge(pc9))
+        td_9m_curr.append(make_badge(pc9, direction_9m))
 
     return str(soup)
 

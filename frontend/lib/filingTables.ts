@@ -44,7 +44,7 @@ export function annotateTableHTML(html: string, kind: AnnotateKind): string {
 
   const cellHasBadge = (cell: HTMLElement) => !!cell.querySelector(".delta-badge");
 
-  const makeBadgeLocal = (pct: number | null) => {
+  const makeBadgeLocal = (pct: number | null, direction: number | null = pct) => {
     const span = doc.createElement("span");
     span.classList.add("delta-badge");
     if (pct === null) {
@@ -52,11 +52,46 @@ export function annotateTableHTML(html: string, kind: AnnotateKind): string {
       span.textContent = "N/A";
       return span;
     }
-    const sign = pct > 0 ? "up" : pct < 0 ? "down" : "flat";
+    const sign = direction !== null && direction > 0 ? "up" : direction !== null && direction < 0 ? "down" : "flat";
     span.classList.add(`delta-${sign}`);
-    const arrow = pct > 0 ? "▲" : pct < 0 ? "▼" : "•";
+    const arrow = direction !== null && direction > 0 ? "▲" : direction !== null && direction < 0 ? "▼" : "•";
     span.textContent = `${arrow} ${(pct * 100).toFixed(1)}%`;
     return span;
+  };
+
+  const incomeRowIsExpenseLike = (row: HTMLTableRowElement): boolean => {
+    const label =
+      Array.from(row.querySelectorAll("td,th"))
+        .map((cell) => (cell.textContent || "").replace(/\u00a0/g, " ").trim())
+        .find((text) => text && parseNumLocal(text) === null) || "";
+    const text = label.toLowerCase().replace(/\s+/g, " ");
+    if (!text) return false;
+    if (/\bother income\s*\(expense\)/.test(text)) return false;
+    if (/\bincome\s*\(loss\)/.test(text)) return false;
+    if (/\bincome\s*\(expense\)/.test(text)) return false;
+    return [
+      "cost of",
+      "cost of sales",
+      "total cost",
+      "expense",
+      "expenses",
+      "research and development",
+      "selling, general",
+      "general and administrative",
+      "marketing, general",
+      "amortization",
+      "depreciation",
+      "income tax provision",
+      "provision for income taxes",
+      "tax provision",
+    ].some((keyword) => text.includes(keyword));
+  };
+
+  const expenseDirection = (current: number, previous: number): number => {
+    const currentMagnitude = Math.abs(current);
+    const previousMagnitude = Math.abs(previous);
+    if (currentMagnitude === previousMagnitude) return 0;
+    return previousMagnitude - currentMagnitude;
   };
 
   const isHeaderRow = (row: HTMLTableRowElement): boolean => {
@@ -183,6 +218,7 @@ export function annotateTableHTML(html: string, kind: AnnotateKind): string {
     });
 
     if (kind === "income") {
+      const expenseLike = incomeRowIsExpenseLike(tr);
       const hasRevenuesHeader = (doc.body.textContent || "").toLowerCase().includes("revenues");
       const hasOtherIncomeHeader = (doc.body.textContent || "").toLowerCase().includes("other income");
 
@@ -200,14 +236,16 @@ export function annotateTableHTML(html: string, kind: AnnotateKind): string {
         const prevRev = parseNumLocal(prevRevCell.textContent);
         if (curRev != null && prevRev != null && !cellHasBadge(curRevCell)) {
           const pct = prevRev !== 0 ? (curRev - prevRev) / Math.abs(prevRev) : 0;
-          curRevCell.appendChild(makeBadgeLocal(pct));
+          const direction = expenseLike ? expenseDirection(curRev, prevRev) : pct;
+          curRevCell.appendChild(makeBadgeLocal(pct, direction));
         }
 
         const curOther = parseNumLocal(curOtherCell.textContent);
         const prevOther = parseNumLocal(prevOtherCell.textContent);
         if (curOther != null && prevOther != null && !cellHasBadge(curOtherCell)) {
           const pct = prevOther !== 0 ? (curOther - prevOther) / Math.abs(prevOther) : 0;
-          curOtherCell.appendChild(makeBadgeLocal(pct));
+          const direction = expenseLike ? expenseDirection(curOther, prevOther) : pct;
+          curOtherCell.appendChild(makeBadgeLocal(pct, direction));
         }
 
         return;
@@ -222,7 +260,8 @@ export function annotateTableHTML(html: string, kind: AnnotateKind): string {
         const prev = parseNumLocal(prevCell.textContent);
         if (cur != null && prev != null && !cellHasBadge(curCell)) {
           const pct = prev !== 0 ? (cur - prev) / Math.abs(prev) : 0;
-          curCell.appendChild(makeBadgeLocal(pct));
+          const direction = expenseLike ? expenseDirection(cur, prev) : pct;
+          curCell.appendChild(makeBadgeLocal(pct, direction));
         }
         return;
       }
@@ -243,12 +282,14 @@ export function annotateTableHTML(html: string, kind: AnnotateKind): string {
 
         if (curQ != null && prevQ != null && !cellHasBadge(curQCell)) {
           const pct = prevQ !== 0 ? (curQ - prevQ) / Math.abs(prevQ) : 0;
-          curQCell.appendChild(makeBadgeLocal(pct));
+          const direction = expenseLike ? expenseDirection(curQ, prevQ) : pct;
+          curQCell.appendChild(makeBadgeLocal(pct, direction));
         }
 
         if (curY != null && prevY != null && !cellHasBadge(curYCell)) {
           const pct = prevY !== 0 ? (curY - prevY) / Math.abs(prevY) : 0;
-          curYCell.appendChild(makeBadgeLocal(pct));
+          const direction = expenseLike ? expenseDirection(curY, prevY) : pct;
+          curYCell.appendChild(makeBadgeLocal(pct, direction));
         }
 
         return;
@@ -261,7 +302,8 @@ export function annotateTableHTML(html: string, kind: AnnotateKind): string {
         const prev = parseNumLocal(prevCell.textContent);
         if (cur == null || prev == null || cellHasBadge(curCell)) return;
         const pct = prev !== 0 ? (cur - prev) / Math.abs(prev) : 0;
-        curCell.appendChild(makeBadgeLocal(pct));
+        const direction = expenseLike ? expenseDirection(cur, prev) : pct;
+        curCell.appendChild(makeBadgeLocal(pct, direction));
       }
 
       return;

@@ -379,3 +379,39 @@ def test_income_annotation_skips_percentage_metric_rows() -> None:
 
     assert revenue_row.find(class_="delta-badge") is not None
     assert margin_row.find(class_="delta-badge") is None
+
+
+def test_income_annotation_marks_expense_increase_as_unfavorable() -> None:
+    income_html = """
+    <table>
+      <tr><td></td><td>2026</td><td>2025</td><td>2026</td><td>2025</td></tr>
+      <tr>
+        <td>Cost of sales</td>
+        <td><ix:nonfraction>120</ix:nonfraction></td>
+        <td><ix:nonfraction>100</ix:nonfraction></td>
+        <td><ix:nonfraction>260</ix:nonfraction></td>
+        <td><ix:nonfraction>200</ix:nonfraction></td>
+      </tr>
+      <tr>
+        <td>Other income (expense), net</td>
+        <td><ix:nonfraction>40</ix:nonfraction></td>
+        <td><ix:nonfraction>20</ix:nonfraction></td>
+        <td><ix:nonfraction>90</ix:nonfraction></td>
+        <td><ix:nonfraction>60</ix:nonfraction></td>
+      </tr>
+    </table>
+    """
+
+    annotated = annotate_income_html(income_html)
+    soup = BeautifulSoup(annotated, "lxml")
+
+    cost_row = soup.find("td", string="Cost of sales").find_parent("tr")
+    cost_badge = cost_row.find(class_="delta-badge")
+    assert cost_badge is not None
+    assert "delta-down" in cost_badge.get("class", [])
+    assert "+20.0%" in cost_badge.get_text()
+
+    other_income_row = soup.find("td", string="Other income (expense), net").find_parent("tr")
+    other_income_badge = other_income_row.find(class_="delta-badge")
+    assert other_income_badge is not None
+    assert "delta-up" in other_income_badge.get("class", [])
