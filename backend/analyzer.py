@@ -121,6 +121,21 @@ def _row_contains_percentage_metric(row) -> bool:
     return False
 
 
+_month_name_re = re.compile(
+    r"\b(January|February|March|April|May|June|July|August|September|October|November|December)\b",
+    re.I,
+)
+
+
+def _row_is_period_header(row) -> bool:
+    text = row.get_text(" ", strip=True).replace("\xa0", " ")
+    if not text:
+        return True
+    if _month_name_re.search(text) and _year_re.search(text):
+        return True
+    return bool(re.search(r"\b(months ended|quarter ended|year ended|years ended)\b", text, re.I))
+
+
 # ----------------------------
 # Income Statement Badge
 # ----------------------------
@@ -190,6 +205,8 @@ def annotate_income_html(income_html: str) -> str:
         if len(numeric_cells) < 4:
             continue
         if _row_contains_percentage_metric(tr):
+            continue
+        if _row_is_period_header(tr):
             continue
 
         # 연도 헤더 행(예: 2024 | 2025 | 2024 | 2025) 에는 배지를 박지 않는다.

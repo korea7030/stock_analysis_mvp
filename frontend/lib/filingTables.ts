@@ -217,8 +217,36 @@ export function annotateTableHTML(html: string, kind: AnnotateKind): string {
       cell.style.whiteSpace = "nowrap";
     });
 
+    const cellsWithHeaders = numericCellInfos
+      .map((info) => ({
+        ...info,
+        header: headerForCellRange(info.start, info.end),
+      }))
+      .filter((info): info is typeof info & { header: NonNullable<ReturnType<typeof headerForCellRange>> } => info.header !== null);
+
     if (kind === "income") {
       const expenseLike = incomeRowIsExpenseLike(tr);
+      if (cellsWithHeaders.length >= 2) {
+        let annotatedAny = false;
+        for (let groupStart = 0; groupStart + 1 < cellsWithHeaders.length; groupStart += 2) {
+          const first = cellsWithHeaders[groupStart];
+          const second = cellsWithHeaders[groupStart + 1];
+          if (first.header.dateValue === second.header.dateValue) continue;
+          const currentInfo = first.header.dateValue > second.header.dateValue ? first : second;
+          const previousInfo = first.header.dateValue > second.header.dateValue ? second : first;
+          const curCell = currentInfo.cell;
+          const prevCell = previousInfo.cell;
+          const cur = parseNumLocal(curCell.textContent);
+          const prev = parseNumLocal(prevCell.textContent);
+          if (cur == null || prev == null || cellHasBadge(curCell)) continue;
+          const pct = prev !== 0 ? (cur - prev) / Math.abs(prev) : 0;
+          const direction = expenseLike ? expenseDirection(cur, prev) : pct;
+          curCell.appendChild(makeBadgeLocal(pct, direction));
+          annotatedAny = true;
+        }
+        if (annotatedAny) return;
+      }
+
       const hasRevenuesHeader = (doc.body.textContent || "").toLowerCase().includes("revenues");
       const hasOtherIncomeHeader = (doc.body.textContent || "").toLowerCase().includes("other income");
 
@@ -308,13 +336,6 @@ export function annotateTableHTML(html: string, kind: AnnotateKind): string {
 
       return;
     }
-
-    const cellsWithHeaders = numericCellInfos
-      .map((info) => ({
-        ...info,
-        header: headerForCellRange(info.start, info.end),
-      }))
-      .filter((info): info is typeof info & { header: NonNullable<ReturnType<typeof headerForCellRange>> } => info.header !== null);
 
     if (cellsWithHeaders.length >= 2) {
       for (let groupStart = 0; groupStart + 1 < cellsWithHeaders.length; groupStart += 2) {

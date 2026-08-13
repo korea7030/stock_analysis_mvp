@@ -415,3 +415,44 @@ def test_income_annotation_marks_expense_increase_as_unfavorable() -> None:
     other_income_badge = other_income_row.find(class_="delta-badge")
     assert other_income_badge is not None
     assert "delta-up" in other_income_badge.get("class", [])
+
+
+def test_income_annotation_skips_period_header_rows() -> None:
+    income_html = """
+    <table>
+      <tr>
+        <td></td>
+        <td colspan="3">Three Months Ended</td>
+        <td></td>
+        <td colspan="3">Six Months Ended</td>
+      </tr>
+      <tr>
+        <td></td>
+        <td>June 27, 2026</td>
+        <td>June 28, 2025</td>
+        <td></td>
+        <td>June 27, 2026</td>
+        <td>June 28, 2025</td>
+      </tr>
+      <tr>
+        <td>Net revenue</td>
+        <td><ix:nonfraction>11,536</ix:nonfraction></td>
+        <td><ix:nonfraction>7,685</ix:nonfraction></td>
+        <td></td>
+        <td><ix:nonfraction>21,789</ix:nonfraction></td>
+        <td><ix:nonfraction>15,123</ix:nonfraction></td>
+      </tr>
+    </table>
+    """
+
+    annotated = annotate_income_html(income_html)
+    soup = BeautifulSoup(annotated, "lxml")
+
+    date_row = soup.find("td", string="June 27, 2026").find_parent("tr")
+    assert date_row.find(class_="delta-badge") is None
+
+    revenue_row = soup.find("td", string="Net revenue").find_parent("tr")
+    badges = revenue_row.find_all(class_="delta-badge")
+    assert len(badges) == 2
+    assert "+50.1%" in badges[0].get_text()
+    assert "+44.1%" in badges[1].get_text()
