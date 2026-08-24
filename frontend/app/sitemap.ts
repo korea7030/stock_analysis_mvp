@@ -1,6 +1,6 @@
 import type { MetadataRoute } from "next";
 import { guideArticles, guidePath } from "./guides/guideData";
-import { siteConfig, stockPath, stockProfiles } from "./siteConfig";
+import { siteConfig } from "./siteConfig";
 
 export const dynamic = "force-static";
 
@@ -8,6 +8,7 @@ const staticRoutes = [
   "",
   "/stocks",
   "/guides",
+  "/methodology",
   "/about",
   "/privacy",
   "/terms",
@@ -19,15 +20,14 @@ export default function sitemap(): MetadataRoute.Sitemap {
   const routes = [
     ...staticRoutes,
     ...guideArticles.map((article) => guidePath(article.slug)),
-    ...stockProfiles.map((stock) => stockPath(stock.ticker)),
   ];
 
   return routes.map((route) => ({
     url: `${siteConfig.url}${route}`,
     lastModified: now,
-    changeFrequency: route.startsWith("/stocks/") || route.startsWith("/guides/")
+    changeFrequency: route.startsWith("/guides/")
       ? "weekly"
       : "monthly",
-    priority: route === "" ? 1 : route.startsWith("/guides/") ? 0.8 : route.startsWith("/stocks/") ? 0.7 : 0.6,
+    priority: route === "" ? 1 : route.startsWith("/guides/") ? 0.8 : route === "/methodology" ? 0.75 : 0.6,
   }));
 }

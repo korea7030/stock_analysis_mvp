@@ -735,6 +735,20 @@ export default function Dashboard() {
           <p className="text-sm text-slate-200 mt-1">
             미국 상장사의 SEC 공시, 재무제표 핵심 지표, 실적 발표 일정을 함께 확인하는 리서치 도구입니다.
           </p>
+          <div className="mt-4 flex flex-wrap gap-3">
+            <Link
+              href="/methodology"
+              className="inline-flex h-9 items-center justify-center rounded bg-white px-3 text-sm font-medium text-slate-900 hover:bg-slate-100"
+            >
+              분석 방법론 보기
+            </Link>
+            <Link
+              href="/guides/verify-automated-sec-extraction"
+              className="inline-flex h-9 items-center justify-center rounded border border-white/30 px-3 text-sm font-medium text-white hover:bg-white/10"
+            >
+              자동 추출 검증 절차
+            </Link>
+          </div>
         </div>
 
         {researchGuideSection}

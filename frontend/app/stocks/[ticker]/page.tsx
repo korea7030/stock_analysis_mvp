@@ -34,6 +34,10 @@ export async function generateMetadata({ params }: StockPageProps): Promise<Meta
   return {
     title: `${stock.ticker} SEC Filing Analysis`,
     description: `${stock.name} filing research page with SEC filing analyzer access, financial statement extraction, earnings context, and original filing review links.`,
+    robots: {
+      index: false,
+      follow: true,
+    },
     alternates: {
       canonical: stockPath(stock.ticker),
     },
