@@ -18,8 +18,8 @@ import {
 
 import type { AiSummaryResponse, AnalyzeResponse, CalendarItem, FilingForm, MetricValue, MetricHistoryResponse } from "@/lib/apiTypes";
 import { annotateTableHTML } from "@/lib/filingTables";
+import { caseStudies, caseStudyPath } from "./case-studies/caseStudyData";
 import { guideArticles, guidePath } from "./guides/guideData";
-import { stockPath, stockProfiles } from "./siteConfig";
 
 const EARNINGS_PAGE_SIZE = 8;
 const FILING_FORMS: readonly FilingForm[] = ["10-Q", "10-K", "6-K", "8-K", "20-F"];
@@ -652,32 +652,30 @@ export default function Dashboard() {
           </ul>
         </section>
 
-        <section className="lg:col-span-7 bg-white rounded-xl border border-slate-200 p-5 shadow-sm" aria-labelledby="stock-research-title">
+        <section className="lg:col-span-7 bg-white rounded-xl border border-slate-200 p-5 shadow-sm" aria-labelledby="case-study-title">
           <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-2">
             <div>
-              <h3 id="stock-research-title" className="text-lg font-semibold text-slate-900">
-                종목별 공시 리서치 페이지
+              <h3 id="case-study-title" className="text-lg font-semibold text-slate-900">
+                실제 공시 검증 사례
               </h3>
               <p className="mt-1 text-sm text-slate-600">
-                주요 미국 기업의 공시 관찰 포인트와 분석 도구 바로가기를 제공합니다.
+                자동 추출 결과를 원문 보고서와 대조하는 과정을 사례로 정리했습니다.
               </p>
             </div>
-            <Link href="/stocks" className="text-sm font-medium text-blue-700 hover:underline">
-              전체 종목 보기
+            <Link href="/case-studies" className="text-sm font-medium text-blue-700 hover:underline">
+              전체 사례 보기
             </Link>
           </div>
           <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {stockProfiles.slice(0, 6).map((stock) => (
+            {caseStudies.map((study) => (
               <Link
-                key={stock.ticker}
-                href={stockPath(stock.ticker)}
+                key={study.slug}
+                href={caseStudyPath(study.slug)}
                 className="block rounded-lg border border-slate-200 p-3 hover:border-blue-300 hover:bg-blue-50/40 transition-colors"
               >
-                <div className="flex items-center justify-between gap-3">
-                  <span className="font-semibold text-slate-900">{stock.ticker}</span>
-                  <span className="text-xs text-slate-500">{stock.sector}</span>
-                </div>
-                <p className="mt-1 text-sm text-slate-700">{stock.name}</p>
+                <p className="text-xs text-slate-500">{study.updated}</p>
+                <h4 className="mt-1 text-sm font-semibold leading-5 text-slate-900">{study.title}</h4>
+                <p className="mt-2 line-clamp-2 text-xs leading-5 text-slate-600">{study.description}</p>
               </Link>
             ))}
           </div>

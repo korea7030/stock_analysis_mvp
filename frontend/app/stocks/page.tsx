@@ -6,6 +6,10 @@ export const metadata: Metadata = {
   title: "Stock Filing Research",
   description:
     "Browse company filing research pages for popular public companies and open the SEC filing analyzer for each ticker.",
+  robots: {
+    index: false,
+    follow: true,
+  },
   alternates: { canonical: "/stocks" },
 };
 
@@ -21,7 +25,7 @@ export default function StocksPage() {
             Stock Filing Research Pages
           </h1>
           <p className="mt-3 text-sm leading-6 text-slate-600">
-            Browse indexable company pages for public filing research. Each page links to
+            Browse company pages for public filing research. These pages link to
             {` ${siteConfig.name}`} with the ticker preloaded for interactive SEC filing analysis.
           </p>
         </div>

@@ -47,9 +47,10 @@ export default function RootLayout({
               <span className="ml-2">SEC filings and financial statement research tools.</span>
             </div>
             <nav className="flex flex-wrap gap-x-4 gap-y-2">
-              <Link href="/stocks" className="hover:text-slate-900 hover:underline">Stocks</Link>
               <Link href="/guides" className="hover:text-slate-900 hover:underline">Guides</Link>
+              <Link href="/case-studies" className="hover:text-slate-900 hover:underline">Case Studies</Link>
               <Link href="/methodology" className="hover:text-slate-900 hover:underline">Methodology</Link>
+              <Link href="/editorial-policy" className="hover:text-slate-900 hover:underline">Editorial Policy</Link>
               <Link href="/about" className="hover:text-slate-900 hover:underline">About</Link>
               <Link href="/privacy" className="hover:text-slate-900 hover:underline">Privacy</Link>
               <Link href="/terms" className="hover:text-slate-900 hover:underline">Terms</Link>
