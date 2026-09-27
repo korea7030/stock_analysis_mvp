@@ -55,7 +55,7 @@ export default async function StockPage({ params }: StockPageProps) {
   const stock = getStock(ticker);
   if (!stock) notFound();
 
-  const analyzerHref = `/?ticker=${encodeURIComponent(stock.ticker)}&form=10-Q`;
+  const analyzerHref = `/tools/sec-filing?ticker=${encodeURIComponent(stock.ticker)}&form=10-Q`;
   const secSearchHref = `https://www.sec.gov/edgar/search/#/q=${encodeURIComponent(stock.ticker)}`;
 
   return (

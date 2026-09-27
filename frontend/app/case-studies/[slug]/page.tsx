@@ -1,8 +1,9 @@
 import type { Metadata } from "next";
-import Link from "next/link";
+/* eslint-disable @next/next/no-html-link-for-pages -- Full reload clears AdSense on excluded routes. */
 import { notFound } from "next/navigation";
 import { caseStudies, caseStudyPath } from "../caseStudyData";
 import { siteConfig } from "../../siteConfig";
+import { PublisherAdSense } from "../../PublisherAdSense";
 
 type CaseStudyPageProps = {
   params: Promise<{
@@ -47,11 +48,12 @@ export default async function CaseStudyPage({ params }: CaseStudyPageProps) {
 
   return (
     <main className="min-h-screen bg-slate-50">
+      <PublisherAdSense />
       <article className="mx-auto max-w-3xl px-4 py-10 sm:px-6">
         <div className="flex flex-wrap items-center gap-3 text-sm">
-          <Link href="/case-studies" className="font-medium text-blue-700 hover:underline">
+          <a href="/case-studies" className="font-medium text-blue-700 hover:underline">
             Case studies
-          </Link>
+          </a>
           <span className="text-slate-300">/</span>
           <span className="text-slate-500">{study.updated}</span>
         </div>
@@ -92,9 +94,9 @@ export default async function CaseStudyPage({ params }: CaseStudyPageProps) {
             이 사례는 투자 조언이 아니라 자동 추출 결과를 원문과 대조하는 방법을 설명하기 위한
             교육용 자료입니다.
           </p>
-          <Link href="/methodology" className="mt-3 inline-block font-medium text-blue-700 hover:underline">
+          <a href="/methodology" className="mt-3 inline-block font-medium text-blue-700 hover:underline">
             분석 방법론 보기
-          </Link>
+          </a>
         </footer>
       </article>
     </main>

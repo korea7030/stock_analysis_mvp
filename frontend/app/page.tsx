@@ -1,56 +1,17 @@
-"use client";
-
-import { useEffect, useState } from "react";
+import type { Metadata } from "next";
+/* eslint-disable @next/next/no-html-link-for-pages -- Full reload clears AdSense on excluded routes. */
 import Link from "next/link";
-import DOMPurify from "dompurify";
-import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  Legend,
-  ResponsiveContainer,
-  LineChart,
-  Line,
-} from "recharts";
-
-import type { AiSummaryResponse, AnalyzeResponse, CalendarItem, FilingForm, MetricValue, MetricHistoryResponse } from "@/lib/apiTypes";
-import { annotateTableHTML } from "@/lib/filingTables";
 import { caseStudies, caseStudyPath } from "./case-studies/caseStudyData";
 import { guideArticles, guidePath } from "./guides/guideData";
+import { HomePublisherAdSense } from "./HomePublisherAdSense";
+import { LegacyToolRedirect } from "./LegacyToolRedirect";
 
-const EARNINGS_PAGE_SIZE = 8;
-const FILING_FORMS: readonly FilingForm[] = ["10-Q", "10-K", "6-K", "8-K", "20-F"];
-const FAVORITES_KEY = "stock-analysis-mvp:favorites";
-const RECENT_KEY = "stock-analysis-mvp:recent";
-const RECENT_MAX = 8;
-
-const LOADING_STEPS = [
-  "SEC EDGAR에서 공시 검색 중...",
-  "최신 보고서 다운로드 중...",
-  "재무제표 파싱 중...",
-  "메트릭 추출 중...",
-];
-
-const researchTopics = [
-  {
-    title: "SEC 공시 기반 재무제표 확인",
-    body:
-      "10-K, 10-Q, 8-K, 20-F, 6-K 보고서에서 매출, 순이익, 현금흐름처럼 기업 분석에 자주 쓰이는 항목을 한 화면에서 비교합니다. 원문 공시 링크를 함께 제공해 숫자를 직접 확인할 수 있습니다.",
-  },
-  {
-    title: "실적 발표 일정과 결과 추적",
-    body:
-      "이번 주와 다음 주의 주요 실적 발표 일정을 정리하고, 발표 완료 기업은 실제 EPS와 매출을 예상치와 비교할 수 있게 표시합니다. 실적 시즌에 확인해야 할 기업을 빠르게 좁히는 데 초점을 둡니다.",
-  },
-  {
-    title: "투자 판단 전 점검 항목",
-    body:
-      "자동 분석 결과는 투자 조언이 아니라 리서치 보조 자료입니다. 매출 성장, 마진 변화, 현금흐름, 부채, 세그먼트별 실적, 경영진 코멘트를 함께 검토해야 합니다.",
-  },
-];
+export const metadata: Metadata = {
+  title: "SEC 공시 분석과 재무제표 검증",
+  description:
+    "SEC 원문 공시와 자동 추출 결과를 대조해 재무제표의 기간, 단위, 부호 차이를 분석하는 독립 리서치 사이트입니다.",
+  alternates: { canonical: "/" },
+};
 
 const filingChecklist = [
   "최근 분기 매출과 전년 동기 매출의 차이가 일회성 요인인지 확인합니다.",
@@ -59,1382 +20,144 @@ const filingChecklist = [
   "부채, 재고, 매출채권, 주식보상비용처럼 손익계산서만으로 보이지 않는 항목을 확인합니다.",
 ];
 
-function isFilingForm(value: string | null | undefined): value is FilingForm {
-  return !!value && (FILING_FORMS as readonly string[]).includes(value);
-}
-
-function readTickerList(key: string): string[] {
-  if (typeof window === "undefined") return [];
-  try {
-    const raw = window.localStorage.getItem(key);
-    if (!raw) return [];
-    const parsed: unknown = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed
-      .filter((x): x is string => typeof x === "string")
-      .map((x) => x.trim().toUpperCase())
-      .filter(Boolean);
-  } catch {
-    return [];
-  }
-}
-
-function writeTickerList(key: string, list: string[]) {
-  if (typeof window === "undefined") return;
-  try {
-    window.localStorage.setItem(key, JSON.stringify(list));
-  } catch {
-    // localStorage 용량 초과/접근 거부 무시
-  }
-}
-
-function clampPage(page: number, totalPages: number) {
-  if (totalPages <= 1) return 1;
-  return Math.min(Math.max(1, page), totalPages);
-}
-
-function formatLastUpdated(value: string | undefined) {
-  if (!value) return "-";
-  const trimmed = value.trim();
-  const parts = trimmed.split("T");
-  if (parts.length === 2) {
-    const date = parts[0];
-    const time = parts[1].split(".")[0].split("Z")[0];
-    return `${date} ${time}`;
-  }
-  return trimmed;
-}
-
-function formatChartValue(v: number): string {
-  const abs = Math.abs(v);
-  if (abs >= 1_000_000) return `${(v / 1_000_000).toFixed(1)}M`;
-  if (abs >= 1_000) return `${(v / 1_000).toFixed(1)}K`;
-  return v.toFixed(1);
-}
-
-function formatRetryAfter(seconds: number | undefined): string {
-  if (!seconds || seconds <= 0) return "";
-  if (seconds >= 3600) return ` 약 ${Math.ceil(seconds / 3600)}시간 후 다시 시도해 주세요.`;
-  if (seconds >= 60) return ` 약 ${Math.ceil(seconds / 60)}분 후 다시 시도해 주세요.`;
-  return ` 약 ${seconds}초 후 다시 시도해 주세요.`;
-}
-
-function apiErrorMessage(
-  fallback: string,
-  payload?: { message?: string; details?: { retry_after_s?: number }; retry_after_s?: number },
-): string {
-  const retryAfter = payload?.retry_after_s ?? payload?.details?.retry_after_s;
-  return `${payload?.message ?? fallback}${formatRetryAfter(retryAfter)}`;
-}
-
-function Pager(props: {
-  page: number;
-  totalItems: number;
-  pageSize: number;
-  onChange: (nextPage: number) => void;
-}) {
-  const totalPages = Math.max(1, Math.ceil(props.totalItems / props.pageSize));
-  if (totalPages <= 1) return null;
-
-  const start = props.totalItems === 0 ? 0 : (props.page - 1) * props.pageSize + 1;
-  const end = Math.min(props.totalItems, props.page * props.pageSize);
+export default function HomePage() {
+  const featuredStudy = caseStudies[0];
+  const recentStudies = caseStudies.slice(1, 3);
+  const featuredGuides = guideArticles.slice(0, 6);
 
   return (
-    <div className="flex items-center justify-between pt-3">
-      <button
-        type="button"
-        className="h-8 px-3 rounded border text-xs disabled:opacity-50"
-        onClick={() => props.onChange(Math.max(1, props.page - 1))}
-        disabled={props.page <= 1}
-      >
-        이전
-      </button>
-      <div className="text-xs text-slate-500">
-        {start}-{end} / 총 {props.totalItems} · {props.page}/{totalPages} 페이지
-      </div>
-      <button
-        type="button"
-        className="h-8 px-3 rounded border text-xs disabled:opacity-50"
-        onClick={() => props.onChange(Math.min(totalPages, props.page + 1))}
-        disabled={props.page >= totalPages}
-      >
-        다음
-      </button>
-    </div>
-  );
-}
-
-export default function Dashboard() {
-  const [ticker, setTicker] = useState("AAPL");
-  const [form, setForm] = useState<FilingForm>("10-Q");
-  const [data, setData] = useState<AnalyzeResponse | null>(null);
-  const [calendar, setCalendar] = useState<CalendarItem[] | null>(null);
-  const [earningsLoading, setEarningsLoading] = useState(false);
-  const [earningsError, setEarningsError] = useState<string | null>(null);
-  const [upcomingPage, setUpcomingPage] = useState(1);
-  const [reportedPage, setReportedPage] = useState(1);
-  const [economicPage, setEconomicPage] = useState(1);
-  const [economicImportance, setEconomicImportance] = useState<"all" | "high" | "medium" | "low">("all");
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [errorCode, setErrorCode] = useState<string | null>(null);
-  const [inputError, setInputError] = useState<string | null>(null);
-  const [pendingAutoAnalyze, setPendingAutoAnalyze] = useState(false);
-  const [favorites, setFavorites] = useState<string[]>([]);
-  const [recent, setRecent] = useState<string[]>([]);
-
-  const [loadingStep, setLoadingStep] = useState(0);
-  const [elapsedSec, setElapsedSec] = useState(0);
-  const [currentStepMsg, setCurrentStepMsg] = useState<string>("");
-
-  const [historyData, setHistoryData] = useState<MetricHistoryResponse | null>(null);
-  const [historyLoading, setHistoryLoading] = useState(false);
-  const [activeTab, setActiveTab] = useState<"metrics" | "trend">("metrics");
-  const [compareTickerInput, setCompareTickerInput] = useState("");
-  const [compareData, setCompareData] = useState<AnalyzeResponse | null>(null);
-  const [compareLoading, setCompareLoading] = useState(false);
-  const [compareError, setCompareError] = useState<string | null>(null);
-
-  const [aiSummary, setAiSummary] = useState<AiSummaryResponse | null>(null);
-  const [aiSummaryLoading, setAiSummaryLoading] = useState(false);
-  const [aiSummaryError, setAiSummaryError] = useState<string | null>(null);
-
-  const defaultApiBase =
-    process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
-  const [apiBaseUrl, setApiBaseUrl] = useState(defaultApiBase);
-  const localFallbackBase = "http://localhost:8000";
-
-  const normalizeBaseUrl = (value: string) =>
-    value.endsWith("/") ? value.slice(0, -1) : value;
-
-  const isValidBaseUrl = (value: string) =>
-    value.startsWith("http://") || value.startsWith("https://");
-
-  useEffect(() => {
-    if (!loading) {
-      setLoadingStep(0);
-      setElapsedSec(0);
-      setCurrentStepMsg("");
-      return;
-    }
-    const stepTimer = setInterval(() => {
-      setLoadingStep((prev) => (prev + 1) % LOADING_STEPS.length);
-    }, 3000);
-    const secTimer = setInterval(() => {
-      setElapsedSec((prev) => prev + 1);
-    }, 1000);
-    return () => {
-      clearInterval(stepTimer);
-      clearInterval(secTimer);
-    };
-  }, [loading]);
-
-  useEffect(() => {
-    let active = true;
-
-    async function loadRuntimeConfig() {
-      try {
-        const response = await fetch("/config.json", { cache: "no-store" });
-        if (!response.ok) return;
-        const payload = (await response.json()) as { apiBaseUrl?: string };
-        const nextBase = payload.apiBaseUrl?.trim();
-        const isLocalhost =
-          typeof window !== "undefined" &&
-          (window.location.hostname === "localhost" ||
-            window.location.hostname === "127.0.0.1");
-        const envOverride = process.env.NEXT_PUBLIC_API_BASE_URL?.trim();
-        const isEnvLocalhost =
-          !!envOverride &&
-          (envOverride.includes("localhost") || envOverride.includes("127.0.0.1"));
-
-        const resolvedBase = isLocalhost
-          ? envOverride || localFallbackBase
-          : nextBase || (!isEnvLocalhost ? envOverride : undefined);
-
-        if (active && resolvedBase && isValidBaseUrl(resolvedBase)) {
-          const normalized = normalizeBaseUrl(resolvedBase);
-          setApiBaseUrl(normalized);
-        }
-      } catch (err) {
-        if (process.env.NODE_ENV !== "production") {
-          console.warn("Runtime config load failed", err);
-        }
-      }
-    }
-
-    loadRuntimeConfig();
-
-    return () => {
-      active = false;
-    };
-  }, []);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const params = new URLSearchParams(window.location.search);
-    const t = params.get("ticker")?.trim().toUpperCase();
-    const f = params.get("form")?.trim();
-    if (t) setTicker(t);
-    if (isFilingForm(f)) setForm(f);
-    if (t) setPendingAutoAnalyze(true);
-  }, []);
-
-  useEffect(() => {
-    setFavorites(readTickerList(FAVORITES_KEY));
-    setRecent(readTickerList(RECENT_KEY));
-  }, []);
-
-  useEffect(() => {
-    writeTickerList(FAVORITES_KEY, favorites);
-  }, [favorites]);
-
-  useEffect(() => {
-    writeTickerList(RECENT_KEY, recent);
-  }, [recent]);
-
-  function toggleFavorite(t: string) {
-    const upper = t.trim().toUpperCase();
-    if (!upper) return;
-    setFavorites((prev) =>
-      prev.includes(upper) ? prev.filter((x) => x !== upper) : [...prev, upper]
-    );
-    setRecent((prev) => prev.filter((x) => x !== upper));
-  }
-
-  function selectTicker(t: string) {
-    const upper = t.trim().toUpperCase();
-    if (!upper) return;
-    setTicker(upper);
-    setInputError(null);
-    setPendingAutoAnalyze(true);
-  }
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const url = new URL(window.location.href);
-    if (ticker.trim()) {
-      url.searchParams.set("ticker", ticker.trim());
-    } else {
-      url.searchParams.delete("ticker");
-    }
-    url.searchParams.set("form", form);
-    const next = url.pathname + url.search + url.hash;
-    const current = window.location.pathname + window.location.search + window.location.hash;
-    if (next !== current) {
-      window.history.replaceState(null, "", next);
-    }
-  }, [ticker, form]);
-
-  useEffect(() => {
-    let active = true;
-    const baseUrl = normalizeBaseUrl(apiBaseUrl);
-    if (!isValidBaseUrl(baseUrl)) return;
-
-    async function loadEarnings() {
-      setEarningsLoading(true);
-      setEarningsError(null);
-      try {
-        const params = new URLSearchParams({ weeks: "1" });
-        if (economicImportance !== "all") {
-          params.set("importance", economicImportance);
-        }
-        const er = await fetch(`${baseUrl}/calendar?${params.toString()}`);
-        if (!er.ok) {
-          throw new Error(`HTTP ${er.status}`);
-        }
-        const payload = (await er.json()) as CalendarItem[];
-        if (active) {
-          setCalendar(Array.isArray(payload) ? payload : []);
-        }
-      } catch (e) {
-        if (active) {
-          const message = e instanceof Error ? e.message : "Failed to load earnings";
-          setEarningsError(message);
-          setCalendar([]);
-        }
-      } finally {
-        if (active) {
-          setEarningsLoading(false);
-        }
-      }
-    }
-
-    loadEarnings();
-    return () => {
-      active = false;
-    };
-  }, [apiBaseUrl, economicImportance]);
-
-  const earnings = (calendar || []).filter((it) => (it.kind || "earnings").toLowerCase() === "earnings");
-  const economic = (calendar || []).filter((it) => (it.kind || "").toLowerCase() === "economic");
-
-  const upcomingAll = earnings.filter((it) => (it.status || "").toLowerCase() !== "reported");
-  const reportedAll = earnings.filter((it) => (it.status || "").toLowerCase() === "reported");
-
-  const upcoming = [...upcomingAll].sort((a, b) => {
-    const ad = a.report_date || "";
-    const bd = b.report_date || "";
-    if (ad !== bd) return ad.localeCompare(bd);
-    return (a.ticker || "").localeCompare(b.ticker || "");
-  });
-
-  const reported = [...reportedAll].sort((a, b) => {
-    const ad = a.report_date || "";
-    const bd = b.report_date || "";
-    if (ad !== bd) return bd.localeCompare(ad);
-    return (a.ticker || "").localeCompare(b.ticker || "");
-  });
-
-  const upcomingTotalPages = Math.max(1, Math.ceil(upcoming.length / EARNINGS_PAGE_SIZE));
-  const reportedTotalPages = Math.max(1, Math.ceil(reported.length / EARNINGS_PAGE_SIZE));
-  const economicTotalPages = Math.max(1, Math.ceil(economic.length / EARNINGS_PAGE_SIZE));
-
-  useEffect(() => {
-    setUpcomingPage((p) => clampPage(p, upcomingTotalPages));
-  }, [upcomingTotalPages]);
-
-  useEffect(() => {
-    setReportedPage((p) => clampPage(p, reportedTotalPages));
-  }, [reportedTotalPages]);
-
-  useEffect(() => {
-    setEconomicPage((p) => clampPage(p, economicTotalPages));
-  }, [economicTotalPages]);
-
-  useEffect(() => {
-    setEconomicPage(1);
-  }, [economicImportance]);
-
-  const upcomingPageItems = upcoming.slice(
-    (upcomingPage - 1) * EARNINGS_PAGE_SIZE,
-    upcomingPage * EARNINGS_PAGE_SIZE
-  );
-
-  const reportedPageItems = reported.slice(
-    (reportedPage - 1) * EARNINGS_PAGE_SIZE,
-    reportedPage * EARNINGS_PAGE_SIZE,
-  );
-  const economicPageItems = economic.slice(
-    (economicPage - 1) * EARNINGS_PAGE_SIZE,
-    economicPage * EARNINGS_PAGE_SIZE,
-  );
-
-  useEffect(() => {
-    if (!pendingAutoAnalyze) return;
-    if (!ticker.trim()) return;
-    if (!isValidBaseUrl(normalizeBaseUrl(apiBaseUrl))) return;
-    setPendingAutoAnalyze(false);
-    analyze();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pendingAutoAnalyze, ticker, form, apiBaseUrl]);
-
-  function analyze() {
-    if (!ticker.trim()) {
-      setInputError("Ticker를 입력하세요");
-      return;
-    }
-
-    setLoading(true);
-    setError(null);
-    setErrorCode(null);
-    setData(null);
-
-    const baseUrl = normalizeBaseUrl(apiBaseUrl);
-    const encodedTicker = encodeURIComponent(ticker.trim());
-    const encodedForm = encodeURIComponent(form);
-    const url = `${baseUrl}/analyze/stream?ticker=${encodedTicker}&form=${encodedForm}`;
-
-    const es = new EventSource(url);
-
-    es.onmessage = (e) => {
-      let parsed: { type: string; message?: string; code?: string; status?: number; retry_after_s?: number; data?: AnalyzeResponse };
-      try {
-        parsed = JSON.parse(e.data) as typeof parsed;
-      } catch {
-        return;
-      }
-
-      if (parsed.type === "progress" && parsed.message) {
-        setLoadingStep(LOADING_STEPS.indexOf(parsed.message) >= 0
-          ? LOADING_STEPS.indexOf(parsed.message)
-          : loadingStep);
-        setCurrentStepMsg(parsed.message);
-      } else if (parsed.type === "result" && parsed.data) {
-        es.close();
-        setData(parsed.data);
-        setLoading(false);
-        const upperTicker = ticker.trim().toUpperCase();
-        if (upperTicker) {
-          setRecent((prev) => {
-            if (favorites.includes(upperTicker)) return prev;
-            const filtered = prev.filter((x) => x !== upperTicker);
-            return [upperTicker, ...filtered].slice(0, RECENT_MAX);
-          });
-        }
-      } else if (parsed.type === "error") {
-        es.close();
-        setErrorCode(parsed.code ?? null);
-        setError(apiErrorMessage("요청에 실패했습니다", parsed));
-        setLoading(false);
-      }
-    };
-
-    es.onerror = () => {
-      es.close();
-      setError("서버 연결에 실패했습니다. 잠시 후 다시 시도해 주세요.");
-      setLoading(false);
-    };
-  }
-
-  const formatNumber = (value: number | null | undefined) => {
-    if (value == null) return "-";
-    return Number(value).toLocaleString();
-  };
-
-  useEffect(() => {
-    if (!data) return;
-    const resolvedTicker = data.meta.ticker || ticker;
-    const resolvedForm = data.meta.report_type || form;
-    const baseUrl = normalizeBaseUrl(apiBaseUrl);
-    setHistoryLoading(true);
-    setHistoryData(null);
-    fetch(`${baseUrl}/analyze/history?ticker=${encodeURIComponent(resolvedTicker)}&form=${encodeURIComponent(resolvedForm)}`)
-      .then((r) => r.json())
-      .then((json) => setHistoryData(json as MetricHistoryResponse))
-      .catch(() => setHistoryData(null))
-      .finally(() => setHistoryLoading(false));
-    setAiSummary(null);
-    setAiSummaryError(null);
-  }, [data, apiBaseUrl, form, ticker]);
-
-  const formatPct = (value: number | null | undefined) => {
-    if (value == null) return "N/A";
-    const sign = value > 0 ? "+" : "";
-    return `${sign}${value.toFixed(1)}%`;
-  };
-
-  async function fetchAiSummary() {
-    if (!data) return;
-    const resolvedTicker = data.meta.ticker || ticker;
-    const resolvedForm = data.meta.report_type || form;
-    const baseUrl = normalizeBaseUrl(apiBaseUrl);
-    setAiSummaryLoading(true);
-    setAiSummaryError(null);
-    setAiSummary(null);
-    try {
-      const res = await fetch(`${baseUrl}/analyze/summary?ticker=${encodeURIComponent(resolvedTicker)}&form=${encodeURIComponent(resolvedForm)}`);
-      if (!res.ok) {
-        const err = (await res.json()) as { message?: string; details?: { retry_after_s?: number } };
-        throw new Error(apiErrorMessage(`HTTP ${res.status}`, err));
-      }
-      setAiSummary((await res.json()) as AiSummaryResponse);
-    } catch (e) {
-      setAiSummaryError(e instanceof Error ? e.message : "AI 요약 실패");
-    } finally {
-      setAiSummaryLoading(false);
-    }
-  }
-
-  async function fetchCompare() {
-    const ct = compareTickerInput.trim().toUpperCase();
-    if (!ct) return;
-    const baseUrl = normalizeBaseUrl(apiBaseUrl);
-    setCompareLoading(true);
-    setCompareError(null);
-    setCompareData(null);
-    try {
-      const res = await fetch(`${baseUrl}/analyze?ticker=${encodeURIComponent(ct)}&form=${encodeURIComponent(form)}`);
-      if (!res.ok) {
-        const err = (await res.json()) as { message?: string; details?: { retry_after_s?: number } };
-        throw new Error(apiErrorMessage(`HTTP ${res.status}`, err));
-      }
-      setCompareData((await res.json()) as AnalyzeResponse);
-    } catch (e) {
-      setCompareError(e instanceof Error ? e.message : "비교 데이터 로드 실패");
-    } finally {
-      setCompareLoading(false);
-    }
-  }
-
-  const COMPARE_METRICS: { key: keyof NonNullable<AnalyzeResponse["metrics"]>; label: string }[] = [
-    { key: "revenue", label: "매출" },
-    { key: "gross_profit", label: "매출총이익" },
-    { key: "operating_income", label: "영업이익" },
-    { key: "net_income", label: "순이익" },
-    { key: "operating_cash_flow", label: "영업현금흐름" },
-    { key: "free_cash_flow", label: "잉여현금흐름" },
-    { key: "total_assets", label: "총자산" },
-    { key: "total_equity", label: "총자본" },
-  ];
-
-  const renderMetricRow = (label: string, metric?: MetricValue | null) => {
-    const current = metric?.current ?? null;
-    const previous = metric?.previous ?? null;
-    const change = metric?.change_pct ?? null;
-    return (
-      <tr key={label} className="hover:bg-slate-50 transition-colors">
-        <td className="text-left font-medium py-2 px-3 text-sm text-slate-700">{label}</td>
-        <td className="text-right py-2 px-3 text-sm font-mono">{formatNumber(current)}</td>
-        <td className="text-right py-2 px-3 text-sm font-mono text-slate-500">{formatNumber(previous)}</td>
-        <td className="text-right py-2 px-3 text-sm font-medium text-slate-700">
-          {formatPct(change)}
-        </td>
-      </tr>
-    );
-  };
-
-  function sanitizeHtml(html: string): string {
-    return DOMPurify.sanitize(html, {
-      USE_PROFILES: { html: true },
-      ADD_TAGS: ["ix:nonfraction", "ix:nonnumeric"],
-    });
-  }
-
-  const chartData = data?.metrics
-    ? [
-        {
-          name: "Revenue",
-          current: data.metrics.revenue?.current ?? 0,
-          previous: data.metrics.revenue?.previous ?? 0,
-        },
-        {
-          name: "Net Income",
-          current: data.metrics.net_income?.current ?? 0,
-          previous: data.metrics.net_income?.previous ?? 0,
-        },
-        {
-          name: "FCF",
-          current: data.metrics.free_cash_flow?.current ?? 0,
-          previous: data.metrics.free_cash_flow?.previous ?? 0,
-        },
-      ]
-    : null;
-
-  const hasChartData =
-    chartData !== null &&
-    chartData.some((d) => d.current !== 0 || d.previous !== 0);
-
-  const researchGuideSection = (
-    <section className="py-4 sm:py-6 space-y-6" aria-labelledby="research-guide-title">
-      <div className="max-w-3xl">
-        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Research guide</p>
-        <h2 id="research-guide-title" className="mt-2 text-2xl font-semibold tracking-tight text-slate-900">
-          SEC 공시를 읽기 위한 기본 분석 흐름
-        </h2>
-        <p className="mt-3 text-sm leading-6 text-slate-600">
-          SEC Filing Dashboard는 기업이 제출한 공식 보고서와 실적 일정을 바탕으로 투자자가 직접 검토할
-          항목을 정리합니다. 특정 종목의 매수나 매도를 권유하지 않으며, 자동 추출된 수치는 원문 공시와
-          회사 발표 자료를 함께 대조하는 것을 전제로 합니다.
-        </p>
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        {researchTopics.map((topic) => (
-          <article key={topic.title} className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm">
-            <h3 className="text-base font-semibold text-slate-900">{topic.title}</h3>
-            <p className="mt-2 text-sm leading-6 text-slate-600">{topic.body}</p>
-          </article>
-        ))}
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        <section className="lg:col-span-5 bg-white rounded-xl border border-slate-200 p-5 shadow-sm" aria-labelledby="filing-checklist-title">
-          <h3 id="filing-checklist-title" className="text-lg font-semibold text-slate-900">
-            공시 분석 체크리스트
-          </h3>
-          <ul className="mt-3 space-y-3 text-sm leading-6 text-slate-600">
-            {filingChecklist.map((item) => (
-              <li key={item} className="flex gap-2">
-                <span className="mt-2 h-1.5 w-1.5 rounded-full bg-slate-400 shrink-0" aria-hidden="true" />
-                <span>{item}</span>
-              </li>
-            ))}
-          </ul>
-        </section>
-
-        <section className="lg:col-span-7 bg-white rounded-xl border border-slate-200 p-5 shadow-sm" aria-labelledby="case-study-title">
-          <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-2">
-            <div>
-              <h3 id="case-study-title" className="text-lg font-semibold text-slate-900">
-                실제 공시 검증 사례
-              </h3>
-              <p className="mt-1 text-sm text-slate-600">
-                자동 추출 결과를 원문 보고서와 대조하는 과정을 사례로 정리했습니다.
-              </p>
-            </div>
-            <Link href="/case-studies" className="text-sm font-medium text-blue-700 hover:underline">
-              전체 사례 보기
+    <main className="min-h-screen bg-slate-50">
+      <HomePublisherAdSense />
+      <LegacyToolRedirect />
+      <div className="mx-auto max-w-7xl space-y-12 p-4 pb-12 sm:space-y-16 sm:p-6 sm:pb-16">
+        <header className="border-b border-slate-200 pb-5 pt-2">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <Link href="/" className="text-lg font-semibold tracking-tight text-slate-950">
+              SEC Filing Dashboard
             </Link>
+            <nav aria-label="주요 메뉴" className="flex flex-wrap gap-x-5 gap-y-2 text-sm text-slate-600">
+              <a href="/case-studies" className="hover:text-slate-950 hover:underline">공시 분석</a>
+              <a href="/guides" className="hover:text-slate-950 hover:underline">가이드</a>
+              <a href="/methodology" className="hover:text-slate-950 hover:underline">방법론</a>
+              <a href="/tools/sec-filing" className="font-medium text-blue-700 hover:underline">분석 도구</a>
+            </nav>
           </div>
-          <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {caseStudies.map((study) => (
-              <Link
-                key={study.slug}
-                href={caseStudyPath(study.slug)}
-                className="block rounded-lg border border-slate-200 p-3 hover:border-blue-300 hover:bg-blue-50/40 transition-colors"
-              >
-                <p className="text-xs text-slate-500">{study.updated}</p>
-                <h4 className="mt-1 text-sm font-semibold leading-5 text-slate-900">{study.title}</h4>
-                <p className="mt-2 line-clamp-2 text-xs leading-5 text-slate-600">{study.description}</p>
-              </Link>
-            ))}
-          </div>
-        </section>
-      </div>
+        </header>
 
-      <section className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm" aria-labelledby="filing-guides-title">
-        <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-2">
-          <div>
-            <h3 id="filing-guides-title" className="text-lg font-semibold text-slate-900">
-              SEC 공시 해설 가이드
-            </h3>
-            <p className="mt-1 text-sm text-slate-600">
-              자동 분석 결과를 원문 공시와 대조할 때 필요한 보고서 유형, 재무제표, 실적 발표 자료 해석법입니다.
+        <section className="grid gap-8 border-b border-slate-200 pb-12 sm:pb-16 lg:grid-cols-12 lg:gap-10" aria-labelledby="publication-title">
+          <div className="lg:col-span-7 lg:pr-6">
+            <p className="text-xs font-semibold uppercase tracking-wide text-blue-700">Independent SEC research</p>
+            <h1 id="publication-title" className="mt-4 max-w-3xl text-4xl font-semibold leading-tight tracking-tight text-slate-950 sm:text-5xl">
+              SEC 공시를 숫자보다 문맥으로 읽습니다
+            </h1>
+            <p className="mt-5 max-w-2xl text-base leading-7 text-slate-600 sm:text-lg">
+              원문 보고서와 자동 추출 결과를 대조해 기간, 단위, 부호가 달라지는 지점을 분석합니다.
+            </p>
+            <div className="mt-7 flex flex-wrap gap-3">
+              <Link
+                href="#latest-research"
+                className="inline-flex h-10 items-center justify-center rounded-lg bg-slate-950 px-4 text-sm font-medium text-white hover:bg-slate-800 active:translate-y-px"
+              >
+                최신 분석 보기
+              </Link>
+              <a
+                href="/tools/sec-filing"
+                className="inline-flex h-10 items-center justify-center rounded-lg border border-slate-300 bg-white px-4 text-sm font-medium text-slate-800 hover:border-slate-400 hover:bg-slate-50 active:translate-y-px"
+              >
+                분석 도구 열기
+              </a>
+            </div>
+          </div>
+
+          {featuredStudy && (
+            <article className="border-slate-200 lg:col-span-5 lg:border-l lg:pl-8">
+              <p className="text-sm font-medium text-slate-500">최신 검증 사례</p>
+              <p className="mt-5 text-xs text-slate-500">{featuredStudy.updated}</p>
+              <h2 className="mt-2 text-2xl font-semibold leading-8 tracking-tight text-slate-950">
+                <Link href={caseStudyPath(featuredStudy.slug)} className="hover:text-blue-700 hover:underline">
+                  {featuredStudy.title}
+                </Link>
+              </h2>
+              <p className="mt-4 text-sm leading-7 text-slate-600">{featuredStudy.description}</p>
+              <Link href={caseStudyPath(featuredStudy.slug)} className="mt-5 inline-flex text-sm font-semibold text-blue-700 hover:underline">
+                사례 전문 읽기
+              </Link>
+            </article>
+          )}
+        </section>
+
+        <section id="latest-research" aria-labelledby="latest-research-title" className="scroll-mt-6">
+          <div className="max-w-3xl">
+            <h2 id="latest-research-title" className="text-2xl font-semibold tracking-tight text-slate-950">최신 공시 검증</h2>
+            <p className="mt-3 text-sm leading-6 text-slate-600">
+              실제 보고서에서 자동 추출 결과가 어긋난 사례와 원문 확인 과정을 기록합니다.
             </p>
           </div>
-          <Link href="/guides" className="text-sm font-medium text-blue-700 hover:underline">
-            전체 가이드 보기
-          </Link>
-        </div>
-        <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3">
-          {guideArticles.map((article) => (
-            <Link
-              key={article.slug}
-              href={guidePath(article.slug)}
-              className="block rounded-lg border border-slate-200 p-3 hover:border-blue-300 hover:bg-blue-50/40 transition-colors"
-            >
-              <p className="text-xs text-slate-500">{article.readingTime}</p>
-              <h4 className="mt-1 text-sm font-semibold leading-5 text-slate-900">{article.title}</h4>
-              <p className="mt-2 line-clamp-3 text-xs leading-5 text-slate-600">{article.description}</p>
-            </Link>
-          ))}
-        </div>
-      </section>
-
-      <section className="bg-slate-900 text-white rounded-xl p-5 sm:p-6" aria-labelledby="source-note-title">
-        <h3 id="source-note-title" className="text-lg font-semibold">데이터 출처와 이용 범위</h3>
-        <p className="mt-2 text-sm leading-6 text-slate-200">
-          공시 데이터는 SEC EDGAR에 공개된 기업 보고서를 기반으로 분석하며, 실적 일정과 경제지표는 외부
-          데이터 제공처의 업데이트 상태에 따라 지연되거나 수정될 수 있습니다. 화면의 숫자와 요약은 정보
-          탐색을 돕기 위한 참고 자료이며, 최종 투자 판단은 공식 원문, 회사 IR 자료, 회계 주석, 본인의
-          투자 기준을 함께 검토해 내려야 합니다.
-        </p>
-      </section>
-    </section>
-  );
-
-  return (
-    <div className="min-h-screen bg-gradient-to-b from-slate-50 via-white to-slate-50">
-      <div className="max-w-7xl mx-auto p-4 sm:p-6 space-y-4 sm:space-y-6">
-
-
-        <div className="rounded-2xl bg-gradient-to-r from-slate-900 to-slate-700 text-white p-5 sm:p-6 shadow">
-          <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight">SEC Filing Dashboard</h1>
-          <p className="text-sm text-slate-200 mt-1">
-            미국 상장사의 SEC 공시, 재무제표 핵심 지표, 실적 발표 일정을 함께 확인하는 리서치 도구입니다.
-          </p>
-          <div className="mt-4 flex flex-wrap gap-3">
-            <Link
-              href="/methodology"
-              className="inline-flex h-9 items-center justify-center rounded bg-white px-3 text-sm font-medium text-slate-900 hover:bg-slate-100"
-            >
-              분석 방법론 보기
-            </Link>
-            <Link
-              href="/guides/verify-automated-sec-extraction"
-              className="inline-flex h-9 items-center justify-center rounded border border-white/30 px-3 text-sm font-medium text-white hover:bg-white/10"
-            >
-              자동 추출 검증 절차
-            </Link>
+          <div className="mt-6 grid gap-6 md:grid-cols-2">
+            {recentStudies.map((study) => (
+              <article key={study.slug} className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                <p className="text-xs text-slate-500">{study.updated}</p>
+                <h3 className="mt-2 text-lg font-semibold leading-7 text-slate-950">
+                  <Link href={caseStudyPath(study.slug)} className="hover:text-blue-700 hover:underline">{study.title}</Link>
+                </h3>
+                <p className="mt-3 text-sm leading-6 text-slate-600">{study.description}</p>
+                <Link href={caseStudyPath(study.slug)} className="mt-4 inline-flex text-sm font-medium text-blue-700 hover:underline">
+                  검증 과정 보기
+                </Link>
+              </article>
+            ))}
           </div>
-        </div>
+          <a href="/case-studies" className="mt-5 inline-flex text-sm font-semibold text-blue-700 hover:underline">
+            전체 공시 분석 보기
+          </a>
+        </section>
 
-        {researchGuideSection}
-
-        <div className="bg-white rounded-xl shadow p-4">
-          <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center">
-
-            <div className="flex flex-col w-full sm:w-auto">
-              <div className="flex items-center justify-between mb-1 gap-2">
-                <span className="text-xs text-gray-500">Ticker</span>
-                <button
-                  type="button"
-                  onClick={() => toggleFavorite(ticker)}
-                  disabled={!ticker.trim()}
-                  className="text-sm leading-none disabled:opacity-30 hover:scale-110 transition-transform"
-                  aria-label="즐겨찾기 토글"
-                  title={
-                    favorites.includes(ticker.trim().toUpperCase())
-                      ? "즐겨찾기 해제"
-                      : "즐겨찾기 추가"
-                  }
-                >
-                  {favorites.includes(ticker.trim().toUpperCase()) ? "★" : "☆"}
-                </button>
-              </div>
-              <input
-                value={ticker}
-                onChange={(e) => {
-                  setTicker(e.target.value.toUpperCase());
-                  if (inputError) setInputError(null);
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") analyze();
-                }}
-                className={`border rounded px-3 py-2 w-full sm:min-w-[140px] sm:w-auto ${
-                  inputError ? "border-red-500" : ""
-                }`}
-              />
-              <div className="h-4 mt-1">
-                {inputError && (
-                  <span className="text-xs text-red-600">{inputError}</span>
-                )}
-              </div>
-            </div>
-
-
-            <div className="flex flex-col w-full sm:w-auto">
-              <span className="text-xs text-gray-500 mb-1">Form</span>
-              <div className="flex flex-wrap gap-3 items-center">
-                {FILING_FORMS.map((f) => (
-                  <label key={f} className="flex gap-1 items-center text-sm cursor-pointer">
-                    <input
-                      type="radio"
-                      name="filing-form"
-                      checked={form === f}
-                      onChange={() => setForm(f)}
-                    />
-                    {f}
-                  </label>
-                ))}
-              </div>
-            </div>
-
-            <button
-              onClick={analyze}
-              className="sm:ml-auto bg-black text-white px-5 py-2 rounded hover:bg-gray-800 disabled:opacity-60 w-full sm:w-auto"
-              disabled={loading}
-            >
-              {loading ? "분석 중..." : "분석"}
-            </button>
+        <section aria-labelledby="guide-index-title" className="border-t border-slate-200 pt-10">
+          <div className="max-w-3xl">
+            <h2 id="guide-index-title" className="text-2xl font-semibold tracking-tight text-slate-950">공시를 읽는 기준</h2>
+            <p className="mt-3 text-sm leading-6 text-slate-600">
+              보고서 유형, 재무제표 기간, GAAP 기준을 구분하는 데 필요한 핵심 자료입니다.
+            </p>
           </div>
-        </div>
-
-
-        {(favorites.length > 0 || recent.length > 0) && (
-          <div className="bg-white rounded-xl shadow p-3 space-y-2 overflow-x-auto">
-            {favorites.length > 0 && (
-              <div className="flex flex-nowrap gap-2 items-center min-w-0">
-                <span className="text-xs text-slate-500 mr-1 shrink-0">★ 즐겨찾기</span>
-                {favorites.map((t) => (
-                  <span
-                    key={t}
-                    className="inline-flex items-center text-xs border rounded-full bg-amber-50 border-amber-200 shrink-0"
-                  >
-                    <button
-                      type="button"
-                      onClick={() => selectTicker(t)}
-                      className="font-medium text-amber-800 hover:underline pl-2 pr-1 py-0.5"
-                    >
-                      {t}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => toggleFavorite(t)}
-                      aria-label={`${t} 즐겨찾기 제거`}
-                      className="text-amber-700 hover:text-amber-900 px-1.5 py-0.5"
-                    >
-                      ×
-                    </button>
-                  </span>
-                ))}
-              </div>
-            )}
-            {recent.length > 0 && (
-              <div className="flex flex-nowrap gap-2 items-center min-w-0">
-                <span className="text-xs text-slate-500 mr-1 shrink-0">최근</span>
-                {recent.map((t) => (
-                  <button
-                    key={t}
-                    type="button"
-                    onClick={() => selectTicker(t)}
-                    className="text-xs border rounded-full px-2 py-0.5 hover:bg-slate-50 shrink-0"
-                  >
-                    {t}
-                  </button>
-                ))}
-              </div>
-            )}
+          <div className="mt-7 grid gap-x-10 gap-y-7 md:grid-cols-2">
+            {featuredGuides.map((article) => (
+              <article key={article.slug} className="border-b border-slate-200 pb-6">
+                <div className="flex items-center justify-between gap-4 text-xs text-slate-500">
+                  <span>Updated {article.updated}</span>
+                  <span>{article.readingTime}</span>
+                </div>
+                <h3 className="mt-2 text-base font-semibold leading-6 text-slate-950">
+                  <Link href={guidePath(article.slug)} className="hover:text-blue-700 hover:underline">{article.title}</Link>
+                </h3>
+                <p className="mt-2 text-sm leading-6 text-slate-600">{article.description}</p>
+              </article>
+            ))}
           </div>
-        )}
+          <a href="/guides" className="mt-5 inline-flex text-sm font-semibold text-blue-700 hover:underline">전체 가이드 보기</a>
+        </section>
 
-
-        {error && (
-          <div className="bg-red-50 text-red-700 border border-red-200 rounded p-3 text-sm">
-            <p>{error}</p>
-            {errorCode === "no_financial_data" && (
-              <div className="mt-2 flex flex-wrap gap-2 items-center">
-                <span className="text-xs text-red-600">다른 보고서로 다시 시도:</span>
-                {FILING_FORMS.filter((f) => f !== form).map((f) => (
-                  <button
-                    key={f}
-                    type="button"
-                    onClick={() => {
-                      setForm(f);
-                      setPendingAutoAnalyze(true);
-                    }}
-                    className="text-xs border border-red-300 rounded px-2 py-0.5 bg-white text-red-700 hover:bg-red-100"
-                  >
-                    {f}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-
-
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-
-
-          <div className="order-1 lg:order-2 lg:col-span-8 space-y-6">
-
-
-            {loading && !data && (
-              <div className="space-y-4">
-                <div className="bg-white rounded-xl shadow p-5 animate-pulse">
-                  <div className="h-5 w-32 bg-slate-200 rounded mb-4" />
-                  <div className="h-4 w-3/4 bg-slate-100 rounded mb-2" />
-                  <div className="h-4 w-1/2 bg-slate-100 rounded mb-2" />
-                  <div className="h-4 w-2/3 bg-slate-100 rounded" />
-
-                  <div className="mt-5 pt-4 border-t border-slate-100">
-                    <div className="flex items-center gap-2">
-                      <span className="inline-block w-2 h-2 rounded-full bg-blue-400 animate-pulse" />
-                      <span className="text-xs text-slate-500">
-                        {currentStepMsg || LOADING_STEPS[loadingStep]}
-                      </span>
-                    </div>
-                    <div className="mt-1.5 flex items-center gap-3">
-                      <span className="text-xs text-slate-400">약 {elapsedSec}초 경과</span>
-                      {elapsedSec >= 15 && (
-                        <span className="text-xs text-slate-400">처음 조회는 30~60초 소요될 수 있습니다</span>
-                      )}
-                    </div>
-                  </div>
-                </div>
-                <div className="bg-white rounded-xl shadow p-5 animate-pulse">
-                  <div className="h-5 w-24 bg-slate-200 rounded mb-4" />
-                  {Array.from({ length: 6 }).map((_, i) => (
-                    <div
-                      key={i}
-                      className={`h-3 bg-slate-100 rounded mb-2 ${i % 3 === 0 ? "w-full" : i % 3 === 1 ? "w-4/5" : "w-3/5"}`}
-                    />
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {data && (
-              <>
-
-                <div className="bg-white rounded-xl shadow p-5">
-                  <h2 className="text-xl font-semibold mb-2">개요</h2>
-                  <p className="font-medium text-slate-800">
-                    {data.meta.company_name} ({data.meta.ticker})
-                  </p>
-                  <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-sm text-gray-500">
-                    <span>{data.meta.report_type ?? "-"}</span>
-                    <span>기준일 {data.meta.period_end ?? "-"}</span>
-                    <span>단위 {data.meta.unit ?? "-"}</span>
-                  </div>
-                  {(data.meta.filing_date || data.meta.accession_number) && (
-                    <p className="mt-1 text-xs text-gray-400">
-                      공시일 {data.meta.filing_date || "-"} · Accession {data.meta.accession_number || "-"}
-                    </p>
-                  )}
-                  <div className="mt-2 flex flex-wrap gap-3 items-center">
-                    {data.meta.source_url && (
-                      <a
-                        className="text-xs text-blue-600 hover:underline"
-                        href={data.meta.source_url}
-                        target="_blank"
-                        rel="noreferrer"
-                      >
-                        원본 문서 보기 →
-                      </a>
-                    )}
-                    <span className="text-xs text-gray-400">
-                      최근 갱신: {formatLastUpdated(data.last_updated)}
-                    </span>
-                  </div>
-                  <p className="mt-3 text-xs leading-relaxed text-slate-400">
-                    SEC 원문 공시에서 자동 추출한 데이터입니다. 표 구조에 따라 일부 항목이 누락되거나 다르게 분류될 수 있으며 투자 조언으로 제공되지 않습니다.
-                  </p>
-                </div>
-
-
-                <div className="bg-gradient-to-r from-violet-50 to-indigo-50 border border-violet-100 rounded-xl p-5">
-                  <div className="flex items-center justify-between gap-3 mb-3">
-                    <div className="flex items-center gap-2">
-                      <span className="text-base font-semibold text-violet-900">AI 재무 요약</span>
-                      <span className="text-xs bg-violet-100 text-violet-700 px-2 py-0.5 rounded-full font-medium">GPT-4o</span>
-                    </div>
-                    {!aiSummary && !aiSummaryLoading && (
-                      <button
-                        type="button"
-                        onClick={() => void fetchAiSummary()}
-                        className="text-xs bg-violet-700 text-white px-3 py-1.5 rounded-lg hover:bg-violet-800"
-                      >
-                        요약 생성
-                      </button>
-                    )}
-                    {aiSummary && (
-                      <button
-                        type="button"
-                        onClick={() => void fetchAiSummary()}
-                        className="text-xs text-violet-600 hover:underline"
-                      >
-                        재생성
-                      </button>
-                    )}
-                  </div>
-                  {aiSummaryLoading && (
-                    <div className="flex items-center gap-2 text-sm text-violet-600">
-                      <span className="inline-block w-2 h-2 rounded-full bg-violet-400 animate-pulse" />
-                      GPT-4o 분석 중...
-                    </div>
-                  )}
-                  {aiSummaryError && (
-                    <p className="text-sm text-red-600">{aiSummaryError}</p>
-                  )}
-                  {aiSummary && (
-                    <p className="text-sm text-slate-800 leading-relaxed">{aiSummary.summary}</p>
-                  )}
-                  {!aiSummary && !aiSummaryLoading && !aiSummaryError && (
-                    <p className="text-xs text-violet-400">버튼을 눌러 AI 인사이트를 생성하세요</p>
-                  )}
-                </div>
-
-                {hasChartData && chartData && (
-                  <div className="bg-white rounded-xl shadow p-5">
-                    <div className="flex items-baseline justify-between gap-2 flex-wrap mb-4">
-                      <h2 className="text-xl font-semibold">핵심 지표 요약</h2>
-                      {data.meta.unit && (
-                        <span className="text-xs text-slate-500">단위 {data.meta.unit}</span>
-                      )}
-                    </div>
-                    <ResponsiveContainer width="100%" height={220}>
-                      <BarChart
-                        data={chartData}
-                        margin={{ top: 4, right: 8, left: 8, bottom: 4 }}
-                        barCategoryGap="30%"
-                        barGap={4}
-                      >
-                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                        <XAxis
-                          dataKey="name"
-                          tick={{ fontSize: 12, fill: "#64748b" }}
-                          axisLine={false}
-                          tickLine={false}
-                        />
-                        <YAxis
-                          tickFormatter={formatChartValue}
-                          tick={{ fontSize: 11, fill: "#94a3b8" }}
-                          axisLine={false}
-                          tickLine={false}
-                          width={52}
-                        />
-                        <Tooltip
-                          formatter={(value: number, name: string) => [
-                            formatChartValue(value),
-                            name === "current" ? "Current" : "Previous",
-                          ]}
-                          contentStyle={{ fontSize: 12, borderRadius: 8, border: "1px solid #e2e8f0" }}
-                        />
-                        <Legend
-                          formatter={(value) => (value === "current" ? "Current" : "Previous")}
-                          wrapperStyle={{ fontSize: 12 }}
-                        />
-                        <Bar dataKey="current" name="current" fill="#3b82f6" radius={[4, 4, 0, 0]} />
-                        <Bar dataKey="previous" name="previous" fill="#bfdbfe" radius={[4, 4, 0, 0]} />
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </div>
-                )}
-
-
-                {data.metrics && (
-                  <div className="bg-white rounded-xl shadow p-5">
-                    <div className="flex items-baseline justify-between gap-2 flex-wrap mb-3">
-                      <h2 className="text-xl font-semibold">주요 지표</h2>
-                      <div className="flex items-center gap-3">
-                        <div className="text-xs text-slate-500">
-                          {data.meta.report_type && <span>{data.meta.report_type}</span>}
-                          {data.meta.period_end && <span> · 기준일 {data.meta.period_end}</span>}
-                          {data.meta.unit && <span> · 단위 {data.meta.unit}</span>}
-                        </div>
-                        <div className="flex rounded-lg border border-slate-200 overflow-hidden text-xs">
-                          <button
-                            type="button"
-                            onClick={() => setActiveTab("metrics")}
-                            className={`px-3 py-1 ${activeTab === "metrics" ? "bg-slate-900 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}
-                          >
-                            지표
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setActiveTab("trend")}
-                            className={`px-3 py-1 ${activeTab === "trend" ? "bg-slate-900 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}
-                          >
-                            트렌드
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-
-                    {activeTab === "metrics" && (
-                      <>
-                        <p className="text-xs text-slate-400 mb-3">
-                          Current = 최근 보고 기간 / Previous = 직전 동기간
-                        </p>
-                        <div className="overflow-x-auto">
-                          <table className="w-full border-collapse">
-                            <thead>
-                              <tr className="border-b-2 border-slate-200">
-                                <th className="text-left py-2 px-3 text-xs font-semibold text-slate-600 uppercase tracking-wide">지표</th>
-                                <th className="text-right py-2 px-3 text-xs font-semibold text-slate-600 uppercase tracking-wide">Current</th>
-                                <th className="text-right py-2 px-3 text-xs font-semibold text-slate-600 uppercase tracking-wide">Previous</th>
-                                <th className="text-right py-2 px-3 text-xs font-semibold text-slate-600 uppercase tracking-wide">변동률</th>
-                              </tr>
-                            </thead>
-                            <tbody className="divide-y divide-slate-50">
-                              {renderMetricRow("Revenue", data.metrics.revenue)}
-                              {renderMetricRow("Gross Profit", data.metrics.gross_profit)}
-                              {renderMetricRow("Operating Income", data.metrics.operating_income)}
-                              {renderMetricRow("Net Income", data.metrics.net_income)}
-                              {renderMetricRow("EPS (Basic)", data.metrics.eps_basic)}
-                              {renderMetricRow("Cash & Equivalents", data.metrics.cash_and_equivalents)}
-                              {renderMetricRow("Total Assets", data.metrics.total_assets)}
-                              {renderMetricRow("Total Liabilities", data.metrics.total_liabilities)}
-                              {renderMetricRow("Total Equity", data.metrics.total_equity)}
-                              {renderMetricRow("Long-term Debt", data.metrics.long_term_debt)}
-                              {renderMetricRow("Operating Cash Flow", data.metrics.operating_cash_flow)}
-                              {renderMetricRow("Capex", data.metrics.capex)}
-                              {renderMetricRow("Free Cash Flow", data.metrics.free_cash_flow)}
-                            </tbody>
-                          </table>
-                        </div>
-                      </>
-                    )}
-
-                    {activeTab === "trend" && (
-                      <div>
-                        <p className="text-xs text-slate-400 mb-3">
-                          트렌드는 이 서비스에 저장된 동일 티커/보고서 조회 이력을 기준으로 표시됩니다. 전체 과거 공시를 자동으로 소급 분석한 결과가 아닙니다.
-                        </p>
-                        {historyLoading && (
-                          <p className="text-sm text-slate-500 py-8 text-center">히스토리 로딩 중...</p>
-                        )}
-                        {!historyLoading && (!historyData || historyData.history.length <= 1) && (
-                          <p className="text-sm text-slate-400 py-8 text-center">
-                            저장된 이력이 부족합니다. 같은 보고서 유형의 분석 결과가 쌓이면 표시됩니다.
-                          </p>
-                        )}
-                        {!historyLoading && historyData && historyData.history.length > 1 && (() => {
-                          const trendChartData = historyData.history.map((entry) => ({
-                            period: entry.period_end,
-                            revenue: entry.metrics?.revenue?.current ?? null,
-                            net_income: entry.metrics?.net_income?.current ?? null,
-                            operating_cash_flow: entry.metrics?.operating_cash_flow?.current ?? null,
-                          }));
-                          return (
-                            <ResponsiveContainer width="100%" height={260}>
-                              <LineChart data={trendChartData} margin={{ top: 4, right: 8, left: 8, bottom: 4 }}>
-                                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                                <XAxis dataKey="period" tick={{ fontSize: 11, fill: "#64748b" }} axisLine={false} tickLine={false} />
-                                <YAxis tickFormatter={formatChartValue} tick={{ fontSize: 11, fill: "#94a3b8" }} axisLine={false} tickLine={false} width={52} />
-                                <Tooltip
-                                  formatter={(value: number) => formatChartValue(value)}
-                                  contentStyle={{ fontSize: 12, borderRadius: 8, border: "1px solid #e2e8f0" }}
-                                />
-                                <Legend wrapperStyle={{ fontSize: 12 }} />
-                                <Line type="monotone" dataKey="revenue" name="매출" stroke="#3b82f6" strokeWidth={2} dot={{ r: 4 }} connectNulls />
-                                <Line type="monotone" dataKey="net_income" name="순이익" stroke="#10b981" strokeWidth={2} dot={{ r: 4 }} connectNulls />
-                                <Line type="monotone" dataKey="operating_cash_flow" name="영업현금흐름" stroke="#f59e0b" strokeWidth={2} dot={{ r: 4 }} connectNulls />
-                              </LineChart>
-                            </ResponsiveContainer>
-                          );
-                        })()}
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {data.metrics && (
-                  <div className="bg-white rounded-xl shadow p-5">
-                    <h2 className="text-xl font-semibold mb-3">티커 비교</h2>
-                    <div className="flex gap-2 mb-4">
-                      <input
-                        value={compareTickerInput}
-                        onChange={(e) => setCompareTickerInput(e.target.value.toUpperCase())}
-                        onKeyDown={(e) => { if (e.key === "Enter") void fetchCompare(); }}
-                        placeholder="비교할 티커 입력 (예: MSFT)"
-                        className="border rounded px-3 py-2 text-sm flex-1"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => void fetchCompare()}
-                        disabled={compareLoading || !compareTickerInput.trim()}
-                        className="bg-slate-800 text-white px-4 py-2 rounded text-sm hover:bg-slate-700 disabled:opacity-50"
-                      >
-                        {compareLoading ? "로딩..." : "비교"}
-                      </button>
-                      {compareData && (
-                        <button
-                          type="button"
-                          onClick={() => { setCompareData(null); setCompareTickerInput(""); setCompareError(null); }}
-                          className="px-3 py-2 border rounded text-sm text-slate-500 hover:bg-slate-50"
-                        >
-                          ✕
-                        </button>
-                      )}
-                    </div>
-                    {compareError && <p className="text-sm text-red-600 mb-3">{compareError}</p>}
-                    {compareData?.metrics && (
-                      <div className="overflow-x-auto">
-                        <table className="w-full border-collapse text-sm">
-                          <thead>
-                            <tr className="border-b-2 border-slate-200">
-                              <th className="text-left py-2 px-3 text-xs font-semibold text-slate-600 uppercase tracking-wide">지표</th>
-                              <th className="text-right py-2 px-3 text-xs font-semibold text-slate-600 uppercase tracking-wide">{data.meta.ticker ?? ticker}</th>
-                              <th className="text-right py-2 px-3 text-xs font-semibold text-slate-600 uppercase tracking-wide">{compareData.meta.ticker ?? compareTickerInput}</th>
-                              <th className="text-right py-2 px-3 text-xs font-semibold text-slate-600 uppercase tracking-wide">차이</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-slate-50">
-                            {COMPARE_METRICS.map(({ key, label }) => {
-                              const aVal = data.metrics?.[key]?.current ?? null;
-                              const bVal = compareData.metrics?.[key]?.current ?? null;
-                              const diff = aVal != null && bVal != null && bVal !== 0
-                                ? ((aVal - bVal) / Math.abs(bVal)) * 100
-                                : null;
-                              return (
-                                <tr key={key} className="hover:bg-slate-50">
-                                  <td className="py-2 px-3 font-medium text-slate-700">{label}</td>
-                                  <td className="py-2 px-3 text-right font-mono">{formatNumber(aVal)}</td>
-                                  <td className="py-2 px-3 text-right font-mono text-slate-500">{formatNumber(bVal)}</td>
-                                  <td className={`py-2 px-3 text-right font-medium ${diff == null ? "text-slate-400" : diff > 0 ? "text-green-600" : diff < 0 ? "text-red-500" : "text-slate-500"}`}>
-                                    {diff == null ? "-" : `${diff > 0 ? "+" : ""}${diff.toFixed(1)}%`}
-                                  </td>
-                                </tr>
-                              );
-                            })}
-                          </tbody>
-                        </table>
-                      </div>
-                    )}
-                  </div>
-                )}
-
-
-                {data.tables?.income_statement && (
-                  <div className="bg-white rounded-xl shadow p-5">
-                    <div className="flex items-baseline justify-between gap-2 flex-wrap mb-3">
-                      <h2 className="text-xl font-bold">손익계산서</h2>
-                      {data.meta.unit && (
-                        <span className="text-xs text-slate-500">단위 {data.meta.unit}</span>
-                      )}
-                    </div>
-                    <div className="filing-table-wrapper overflow-x-auto max-h-[500px] overflow-y-auto rounded border border-slate-100">
-                      <div
-                        dangerouslySetInnerHTML={{
-                          __html: annotateTableHTML(sanitizeHtml(data.tables.income_statement), "income"),
-                        }}
-                      />
-                    </div>
-                  </div>
-                )}
-
-
-                {data.tables?.balance_sheet && (
-                  <div className="bg-white rounded-xl shadow p-5">
-                    <div className="flex items-baseline justify-between gap-2 flex-wrap mb-3">
-                      <h2 className="text-xl font-bold">재무상태표</h2>
-                      {data.meta.unit && (
-                        <span className="text-xs text-slate-500">단위 {data.meta.unit}</span>
-                      )}
-                    </div>
-                    <div className="filing-table-wrapper overflow-x-auto max-h-[500px] overflow-y-auto rounded border border-slate-100">
-                      <div
-                        dangerouslySetInnerHTML={{
-                          __html: annotateTableHTML(sanitizeHtml(data.tables.balance_sheet), "balance"),
-                        }}
-                      />
-                    </div>
-                  </div>
-                )}
-
-
-                {data.tables?.cash_flow && (
-                  <div className="bg-white rounded-xl shadow p-5">
-                    <div className="flex items-baseline justify-between gap-2 flex-wrap mb-3">
-                      <h2 className="text-xl font-bold">현금흐름표</h2>
-                      {data.meta.unit && (
-                        <span className="text-xs text-slate-500">단위 {data.meta.unit}</span>
-                      )}
-                    </div>
-                    <div className="filing-table-wrapper overflow-x-auto max-h-[500px] overflow-y-auto rounded border border-slate-100">
-                      <div
-                        dangerouslySetInnerHTML={{
-                          __html: annotateTableHTML(sanitizeHtml(data.tables.cash_flow), "cash"),
-                        }}
-                      />
-                    </div>
-                  </div>
-                )}
-              </>
-            )}
-          </div>
-
-
-          <div className="order-2 lg:order-1 lg:col-span-4 space-y-6">
-            <div className="bg-white rounded-xl shadow p-5">
-              <div className="flex items-center justify-between mb-1">
-                <h2 className="text-base sm:text-lg font-semibold">이번 주 캘린더</h2>
-                <a
-                  className="text-xs text-slate-500 hover:underline"
-                  href="https://www.nasdaq.com/market-activity/earnings"
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  출처
-                </a>
-              </div>
-              <p className="text-xs text-slate-400 mb-3">실적 발표 · 경제지표</p>
-
-              {earningsLoading && <p className="text-sm text-slate-500 mt-3">불러오는 중...</p>}
-              {earningsError && (
-                <p className="text-sm text-red-600 mt-3">실적 데이터를 불러오지 못했습니다.</p>
-              )}
-              {!earningsLoading && !earningsError && earnings.length === 0 && (
-                <p className="text-sm text-slate-500 mt-3">이번 주 발표 예정/완료된 실적이 없습니다.</p>
-              )}
-
-              {!earningsLoading && !earningsError && (
-                <div className="mt-2 space-y-5">
-
-                  {upcoming.length > 0 && (
-                    <div>
-                      <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">발표 예정</div>
-                      <div className="space-y-2">
-                        {upcomingPageItems.map((it, idx) => (
-                          <div key={`${it.ticker || "x"}-${idx}`} className="border rounded-lg p-3">
-                            <div className="flex items-center justify-between gap-2">
-                              <div className="font-semibold text-sm">{it.ticker || "-"}</div>
-                              <div className="text-xs text-slate-500">
-                                {(it.report_date || "-")} · {it.release_time || "TBD"}
-                              </div>
-                            </div>
-                            <div className="text-xs text-slate-500 mt-0.5 line-clamp-1">{it.company || "-"}</div>
-                            <div className="flex gap-3 mt-2 text-xs">
-                              {it.earnings_release_url && (
-                                <a className="text-blue-600 hover:underline" href={it.earnings_release_url} target="_blank" rel="noreferrer">
-                                  SEC 8-Ks
-                                </a>
-                              )}
-                              {it.transcript_search_url && (
-                                <a className="text-blue-600 hover:underline" href={it.transcript_search_url} target="_blank" rel="noreferrer">
-                                  Transcript
-                                </a>
-                              )}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                      <Pager page={upcomingPage} totalItems={upcoming.length} pageSize={EARNINGS_PAGE_SIZE} onChange={setUpcomingPage} />
-                    </div>
-                  )}
-
-
-                  {reported.length > 0 && (
-                    <div>
-                      <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">발표 완료</div>
-                      <div className="space-y-2">
-                        {reportedPageItems.map((it, idx) => (
-                          <div key={`${it.ticker || "y"}-${idx}`} className="border rounded-lg p-3 bg-slate-50">
-                            <div className="flex items-center justify-between gap-2">
-                              <div className="font-semibold text-sm">{it.ticker || "-"}</div>
-                              <div className="text-xs text-slate-500">
-                                {(it.report_date || "-")} · {it.release_time || "TBD"}
-                              </div>
-                            </div>
-                            <div className="text-xs text-slate-500 mt-0.5 line-clamp-1">{it.company || "-"}</div>
-                            <div className="grid grid-cols-2 gap-1 mt-2 text-xs text-slate-600">
-                              <div>EPS: <span className="font-medium">{it.eps_actual || "-"}</span> / {it.eps_estimate || "-"}</div>
-                              <div>Rev: <span className="font-medium">{it.revenue_actual || "-"}</span> / {it.revenue_estimate || "-"}</div>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                      <Pager page={reportedPage} totalItems={reported.length} pageSize={EARNINGS_PAGE_SIZE} onChange={setReportedPage} />
-                    </div>
-                  )}
-
-
-                  {economic.length > 0 && (
-                    <div>
-                      <div className="flex items-center justify-between gap-2 mb-2">
-                        <div className="text-xs font-semibold text-indigo-600 uppercase tracking-wide">경제지표</div>
-                        <div className="flex rounded-md border border-indigo-100 bg-white p-0.5">
-                          {(["all", "high", "medium", "low"] as const).map((level) => (
-                            <button
-                              key={level}
-                              type="button"
-                              className={`px-2 py-1 text-[11px] rounded ${
-                                economicImportance === level
-                                  ? "bg-indigo-600 text-white"
-                                  : "text-slate-500 hover:bg-indigo-50"
-                              }`}
-                              onClick={() => setEconomicImportance(level)}
-                            >
-                              {level === "all" ? "전체" : level}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                      <div className="space-y-2">
-                        {economicPageItems.map((it, idx) => (
-                          <div key={`${it.event || "ev"}-${idx}`} className="border rounded-lg p-3 bg-indigo-50/40">
-                            <div className="flex items-start justify-between gap-2">
-                              <div className="font-medium text-sm leading-tight">{it.event || "-"}</div>
-                              <div className="text-xs text-slate-500 shrink-0">{it.event_date || "-"}</div>
-                            </div>
-                            <div className="text-xs text-slate-500 mt-0.5">
-                              {it.country || "US"} · {it.importance || "-"}
-                              {it.release_time && ` · ${it.release_time}`}
-                            </div>
-                            <div className="text-xs mt-2 grid grid-cols-3 gap-1 bg-white/70 p-2 rounded border border-indigo-100/50">
-                              <div className="text-slate-500">실제<br /><span className="font-semibold text-slate-800">{it.actual || "-"}</span></div>
-                              <div className="text-slate-500">예측<br /><span className="font-semibold text-slate-800">{it.consensus || "-"}</span></div>
-                              <div className="text-slate-500">이전<br /><span className="font-semibold text-slate-800">{it.previous || "-"}</span></div>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                      <Pager page={economicPage} totalItems={economic.length} pageSize={EARNINGS_PAGE_SIZE} onChange={setEconomicPage} />
-                    </div>
-                  )}
-                  {economic.length === 0 && (
-                    <p className="text-sm text-slate-500">표시할 경제지표가 없습니다.</p>
-                  )}
-                </div>
-              )}
+        <section className="grid gap-8 rounded-xl border border-slate-200 bg-slate-100 p-6 lg:grid-cols-12 lg:p-8" aria-labelledby="research-standard-title">
+          <div className="lg:col-span-5">
+            <h2 id="research-standard-title" className="text-xl font-semibold text-slate-950">분석 기준과 출처</h2>
+            <p className="mt-3 text-sm leading-7 text-slate-600">
+              공시 데이터는 SEC EDGAR 원문을 기준으로 합니다. 자동 분석 결과는 표 구조에 따라 누락되거나
+              다르게 분류될 수 있어 중요한 수치는 원문과 회사 IR 자료에서 다시 확인합니다.
+            </p>
+            <div className="mt-5 flex flex-wrap gap-4 text-sm font-medium">
+              <a href="/methodology" className="text-blue-700 hover:underline">분석 방법론</a>
+              <a href="/editorial-policy" className="text-blue-700 hover:underline">편집 원칙</a>
             </div>
           </div>
-
-        </div>
+          <div className="lg:col-span-7">
+            <h3 className="text-sm font-semibold text-slate-900">공시 검증 체크리스트</h3>
+            <ul className="mt-4 grid gap-3 sm:grid-cols-2">
+              {filingChecklist.map((item) => (
+                <li key={item} className="rounded-lg bg-white p-4 text-sm leading-6 text-slate-600 shadow-sm">{item}</li>
+              ))}
+            </ul>
+          </div>
+        </section>
       </div>
-    </div>
+    </main>
   );
 }

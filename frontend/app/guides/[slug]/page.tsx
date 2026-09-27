@@ -1,8 +1,9 @@
 import type { Metadata } from "next";
-import Link from "next/link";
+/* eslint-disable @next/next/no-html-link-for-pages -- Full reload clears AdSense on excluded routes. */
 import { notFound } from "next/navigation";
 import { guideArticles, guidePath } from "../guideData";
 import { siteConfig } from "../../siteConfig";
+import { PublisherAdSense } from "../../PublisherAdSense";
 
 type GuidePageProps = {
   params: Promise<{
@@ -49,11 +50,12 @@ export default async function GuidePage({ params }: GuidePageProps) {
 
   return (
     <main className="min-h-screen bg-slate-50">
+      <PublisherAdSense />
       <article className="mx-auto max-w-3xl px-4 py-10 sm:px-6">
         <div className="flex flex-wrap items-center gap-3 text-sm">
-          <Link href="/guides" className="font-medium text-blue-700 hover:underline">
+          <a href="/guides" className="font-medium text-blue-700 hover:underline">
             Guides
-          </Link>
+          </a>
           <span className="text-slate-300">/</span>
           <span className="text-slate-500">{article.readingTime}</span>
         </div>
@@ -86,9 +88,9 @@ export default async function GuidePage({ params }: GuidePageProps) {
             이 글은 투자 조언이 아니라 SEC 공시를 직접 검토하기 위한 교육용 자료입니다. 중요한
             숫자는 원문 SEC 보고서, 회사 IR 자료, 회계 주석과 함께 확인해야 합니다.
           </p>
-          <Link href="/" className="mt-3 inline-block font-medium text-blue-700 hover:underline">
+          <a href="/tools/sec-filing" className="mt-3 inline-block font-medium text-blue-700 hover:underline">
             분석 도구로 이동
-          </Link>
+          </a>
         </footer>
       </article>
     </main>
