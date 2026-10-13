@@ -1,24 +1,57 @@
 # Deployment Checklist
 
-## Frontend
+## Cloudflare Pages Frontends
 
-Set these environment variables in the frontend hosting provider before building:
+Create two Cloudflare Pages projects from the same GitHub repository. Pin Node.js instead of relying on the platform default.
 
-- `NEXT_PUBLIC_SITE_URL` — public canonical site URL, `https://finnblog.pe.kr`.
-- `NEXT_PUBLIC_API_BASE_URL` — deployed FastAPI backend URL, for example `https://stock-backend-api-344913823090.us-central1.run.app`.
+### Publication project
+
+- Root directory: `frontend`
+- Build command: `npm run build`
+- Build output directory: `out`
+- Custom domain: `finnblog.pe.kr`
+
+Set these environment variables for both production and preview builds:
+
+- `NODE_VERSION=22.16.0`
+- `NEXT_PUBLIC_SITE_URL=https://finnblog.pe.kr`
+- `NEXT_PUBLIC_TOOL_URL=https://app.finnblog.pe.kr`
+- `NEXT_PUBLIC_API_BASE_URL=<deployed FastAPI backend URL>`
+
+### Tool project
+
+- Root directory: `tool-frontend`
+- Build command: `npm run build`
+- Build output directory: `out`
+- Custom domain: `app.finnblog.pe.kr`
+
+Set the same four environment variables as the publication project. The tool output must contain only the analyzer, its 404 page, and `robots.txt`; it must not contain AdSense code or publication pages.
+
+### Legacy tool redirect
+
+The publication build contains a 308 fallback redirect for `/tools/sec-filing`. To preserve `ticker` and `form` query parameters, also create a Cloudflare **Single Redirect** for the `finnblog.pe.kr` zone:
+
+- Incoming request: URI Path equals `/tools/sec-filing`
+- Target URL: `https://app.finnblog.pe.kr/`
+- Status code: `308`
+- Preserve query string: enabled
+
+The zone-level rule is required for query preservation; the Pages `_redirects` file is only the no-query fallback.
 
 If using the runtime `frontend/public/config.json` fallback, keep `apiBaseUrl` aligned with `NEXT_PUBLIC_API_BASE_URL`.
 
 After deployment, verify:
 
-- `https://your-domain/`
-- `https://your-domain/about`
-- `https://your-domain/privacy`
-- `https://your-domain/terms`
-- `https://your-domain/disclaimer`
-- `https://your-domain/stocks/aapl`
-- `https://your-domain/robots.txt`
-- `https://your-domain/sitemap.xml`
+- `https://finnblog.pe.kr/`
+- `https://finnblog.pe.kr/about`
+- `https://finnblog.pe.kr/privacy`
+- `https://finnblog.pe.kr/terms`
+- `https://finnblog.pe.kr/disclaimer`
+- `https://finnblog.pe.kr/stocks/aapl`
+- `https://finnblog.pe.kr/robots.txt`
+- `https://finnblog.pe.kr/sitemap.xml`
+- `https://app.finnblog.pe.kr/`
+- `curl -I 'https://finnblog.pe.kr/tools/sec-filing?ticker=GOOGL&form=8-K'` returns `308` and a `Location` containing both query parameters.
 
 ## Backend
 
@@ -31,7 +64,7 @@ Set these GitHub Actions secrets:
 
 Set these GitHub Actions variables:
 
-- `ALLOWED_ORIGINS` — comma-separated frontend origins. Default deployment value is `https://finnblog.pe.kr,https://www.finnblog.pe.kr,https://stock-analysis-mvp.pages.dev`; set this explicitly if the production domain changes.
+- `ALLOWED_ORIGINS` — comma-separated frontend origins. Use `https://finnblog.pe.kr,https://www.finnblog.pe.kr,https://app.finnblog.pe.kr,https://stock-analysis-mvp.pages.dev`. An explicitly configured repository variable overrides the workflow default, so update both when origins change.
 - `RATE_LIMIT_ENABLED` — default `true`.
 - `ANALYZE_IP_LIMIT` / `ANALYZE_IP_WINDOW_S` — default `20` / `3600`.
 - `ANALYZE_TICKER_LIMIT` / `ANALYZE_TICKER_WINDOW_S` — default `8` / `900`.

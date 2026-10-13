@@ -9,7 +9,7 @@ Date: 2026-09-27
 - Phase 2 complete: the analyzer now lives at `/tools/sec-filing`, declares `noindex, follow`, and old root query-string entry points redirect in the browser without changing ticker or form values.
 - Phase 3 complete: the AdSense loader is limited to the publication home page and individual guide and case-study articles. Tool, stock, list, methodology, about, editorial-policy, legal, and error pages do not load it.
 - Editorial trust update complete: every retained guide and case study now displays a verified author identity, exact publication and modification dates, primary sources, an evidence table, limitations, correction status, and matching Article JSON-LD.
-- Tool-domain separation is in progress: publication links and legacy root query entry points target `https://app.finnblog.pe.kr/` while preserving ticker and form parameters. A standalone tool app now emits only the tool root, 404 page, and robots file with app-domain canonical metadata, a noindex policy, and no AdSense code. CORS and Cloudflare project configuration remain pending.
+- Tool-domain separation is deployment ready: publication links and legacy root query entry points target `https://app.finnblog.pe.kr/` while preserving ticker and form parameters. A standalone tool app emits only the tool root, 404 page, and robots file with app-domain canonical metadata, a noindex policy, and no AdSense code. CORS defaults, legacy redirect fallback, and Cloudflare deployment instructions are committed; live Cloudflare project and redirect verification remain pending.
 
 ## Conclusion
 
