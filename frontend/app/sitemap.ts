@@ -12,25 +12,30 @@ const staticRoutes = [
   "/methodology",
   "/editorial-policy",
   "/about",
+  "/authors/lee-jae-hyun",
   "/privacy",
   "/terms",
   "/disclaimer",
 ];
 
 export default function sitemap(): MetadataRoute.Sitemap {
-  const now = new Date();
-  const routes = [
-    ...staticRoutes,
-    ...guideArticles.map((article) => guidePath(article.slug)),
-    ...caseStudies.map((study) => caseStudyPath(study.slug)),
-  ];
-
-  return routes.map((route) => ({
+  const staticEntries: MetadataRoute.Sitemap = staticRoutes.map((route) => ({
     url: `${siteConfig.url}${route}`,
-    lastModified: now,
-    changeFrequency: route.startsWith("/guides/") || route.startsWith("/case-studies/")
-      ? "weekly"
-      : "monthly",
-    priority: route === "" ? 1 : route.startsWith("/guides/") || route.startsWith("/case-studies/") ? 0.8 : route === "/methodology" ? 0.75 : 0.6,
+    changeFrequency: "monthly",
+    priority: route === "" ? 1 : route === "/methodology" ? 0.75 : 0.6,
   }));
+  const guideEntries: MetadataRoute.Sitemap = guideArticles.map((article) => ({
+    url: `${siteConfig.url}${guidePath(article.slug)}`,
+    lastModified: article.updatedAt,
+    changeFrequency: "monthly",
+    priority: 0.8,
+  }));
+  const caseStudyEntries: MetadataRoute.Sitemap = caseStudies.map((study) => ({
+    url: `${siteConfig.url}${caseStudyPath(study.slug)}`,
+    lastModified: study.updatedAt,
+    changeFrequency: "monthly",
+    priority: 0.8,
+  }));
+
+  return [...staticEntries, ...guideEntries, ...caseStudyEntries];
 }

@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 /* eslint-disable @next/next/no-html-link-for-pages -- Full reload clears AdSense on excluded routes. */
 import { notFound } from "next/navigation";
+import { ArticleByline, ArticleTrustPanel } from "../../ArticleTrustPanel";
+import { buildArticleJsonLd, formatEditorialDate, serializeJsonLd } from "../../editorialData";
 import { caseStudies, caseStudyPath } from "../caseStudyData";
 import { siteConfig } from "../../siteConfig";
 import { PublisherAdSense } from "../../PublisherAdSense";
@@ -45,9 +47,11 @@ export default async function CaseStudyPage({ params }: CaseStudyPageProps) {
   const { slug } = await params;
   const study = getCaseStudy(slug);
   if (!study) notFound();
+  const jsonLd = buildArticleJsonLd({ ...study, path: caseStudyPath(study.slug) });
 
   return (
     <main className="min-h-screen bg-slate-50">
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: serializeJsonLd(jsonLd) }} />
       <PublisherAdSense />
       <article className="mx-auto max-w-3xl px-4 py-10 sm:px-6">
         <div className="flex flex-wrap items-center gap-3 text-sm">
@@ -55,7 +59,9 @@ export default async function CaseStudyPage({ params }: CaseStudyPageProps) {
             Case studies
           </a>
           <span className="text-slate-300">/</span>
-          <span className="text-slate-500">{study.updated}</span>
+          <time dateTime={study.updatedAt} className="text-slate-500">
+            Updated {formatEditorialDate(study.updatedAt)}
+          </time>
         </div>
 
         <header className="mt-6 border-b border-slate-200 pb-6">
@@ -66,14 +72,7 @@ export default async function CaseStudyPage({ params }: CaseStudyPageProps) {
             {study.title}
           </h1>
           <p className="mt-4 text-base leading-7 text-slate-600">{study.description}</p>
-          <a
-            href={study.sourceUrl}
-            target="_blank"
-            rel="noreferrer"
-            className="mt-4 inline-flex text-sm font-medium text-blue-700 hover:underline"
-          >
-            Source: {study.sourceLabel}
-          </a>
+          <ArticleByline article={study} />
         </header>
 
         <div className="mt-8 space-y-8">
@@ -88,6 +87,8 @@ export default async function CaseStudyPage({ params }: CaseStudyPageProps) {
             </section>
           ))}
         </div>
+
+        <ArticleTrustPanel article={study} />
 
         <footer className="mt-10 rounded-lg border border-slate-200 bg-white p-5 text-sm leading-6 text-slate-600">
           <p>

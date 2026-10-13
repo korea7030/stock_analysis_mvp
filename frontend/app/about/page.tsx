@@ -18,7 +18,7 @@ export default function AboutPage() {
           title: "What this site does",
           body: [
             "The dashboard retrieves public company filing data, extracts financial tables when available, and displays selected metrics such as revenue, net income, cash flow, assets, liabilities, and equity.",
-            "The stock pages provide an indexable research entry point for companies that users commonly analyze. Each page links back to the interactive filing analyzer.",
+            "The publication pages explain filing checks and source-based examples, while the separate analyzer lets users inspect a selected ticker and filing type. Automatically generated stock pages are not presented as editorial articles.",
           ],
         },
         {

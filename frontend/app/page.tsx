@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 /* eslint-disable @next/next/no-html-link-for-pages -- Full reload clears AdSense on excluded routes. */
 import Link from "next/link";
 import { caseStudies, caseStudyPath } from "./case-studies/caseStudyData";
+import { formatEditorialDate } from "./editorialData";
 import { guideArticles, guidePath } from "./guides/guideData";
 import { HomePublisherAdSense } from "./HomePublisherAdSense";
 import { LegacyToolRedirect } from "./LegacyToolRedirect";
@@ -72,7 +73,11 @@ export default function HomePage() {
           {featuredStudy && (
             <article className="border-slate-200 lg:col-span-5 lg:border-l lg:pl-8">
               <p className="text-sm font-medium text-slate-500">최신 검증 사례</p>
-              <p className="mt-5 text-xs text-slate-500">{featuredStudy.updated}</p>
+              <p className="mt-5 text-xs text-slate-500">
+                <time dateTime={featuredStudy.updatedAt}>
+                  Updated {formatEditorialDate(featuredStudy.updatedAt)}
+                </time>
+              </p>
               <h2 className="mt-2 text-2xl font-semibold leading-8 tracking-tight text-slate-950">
                 <Link href={caseStudyPath(featuredStudy.slug)} className="hover:text-blue-700 hover:underline">
                   {featuredStudy.title}
@@ -96,7 +101,9 @@ export default function HomePage() {
           <div className="mt-6 grid gap-6 md:grid-cols-2">
             {recentStudies.map((study) => (
               <article key={study.slug} className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-                <p className="text-xs text-slate-500">{study.updated}</p>
+                <p className="text-xs text-slate-500">
+                  <time dateTime={study.updatedAt}>Updated {formatEditorialDate(study.updatedAt)}</time>
+                </p>
                 <h3 className="mt-2 text-lg font-semibold leading-7 text-slate-950">
                   <Link href={caseStudyPath(study.slug)} className="hover:text-blue-700 hover:underline">{study.title}</Link>
                 </h3>
@@ -123,7 +130,7 @@ export default function HomePage() {
             {featuredGuides.map((article) => (
               <article key={article.slug} className="border-b border-slate-200 pb-6">
                 <div className="flex items-center justify-between gap-4 text-xs text-slate-500">
-                  <span>Updated {article.updated}</span>
+                  <time dateTime={article.updatedAt}>Updated {formatEditorialDate(article.updatedAt)}</time>
                   <span>{article.readingTime}</span>
                 </div>
                 <h3 className="mt-2 text-base font-semibold leading-6 text-slate-950">

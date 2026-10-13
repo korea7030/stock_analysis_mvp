@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { formatEditorialDate } from "../editorialData";
 import { caseStudies, caseStudyPath } from "./caseStudyData";
 
 export const metadata: Metadata = {
@@ -33,7 +34,9 @@ export default function CaseStudiesPage() {
         <section className="mt-8 grid gap-4">
           {caseStudies.map((study) => (
             <article key={study.slug} className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-              <p className="text-xs text-slate-500">Updated {study.updated}</p>
+              <p className="text-xs text-slate-500">
+                <time dateTime={study.updatedAt}>Updated {formatEditorialDate(study.updatedAt)}</time>
+              </p>
               <h2 className="mt-2 text-xl font-semibold text-slate-950">
                 <Link href={caseStudyPath(study.slug)} className="hover:underline">
                   {study.title}

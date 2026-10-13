@@ -1,10 +1,10 @@
-export type CaseStudy = {
+import { editorialAuthor } from "../editorialData";
+import type { EditorialArticleData } from "../editorialData";
+
+export type CaseStudy = EditorialArticleData & {
   slug: string;
   title: string;
   description: string;
-  updated: string;
-  sourceLabel: string;
-  sourceUrl: string;
   sections: {
     title: string;
     body: string[];
@@ -17,9 +17,39 @@ export const caseStudies = [
     title: "AMD 2026년 2분기 손익계산서에서 기간 비교가 틀어지는 지점",
     description:
       "AMD 10-Q 손익계산서를 예로 들어 3개월 실적과 6개월 누적 실적의 비교 위치를 확인하는 방법입니다.",
-    updated: "September 2026",
-    sourceLabel: "AMD 2026 Q2 Form 10-Q",
-    sourceUrl: "https://www.sec.gov/Archives/edgar/data/2488/000000248826000123/amd-20260627.htm",
+    publishedAt: "2026-09-08",
+    updatedAt: "2026-10-13",
+    author: editorialAuthor,
+    sources: [
+      {
+        label: "AMD 2026 Q2 Form 10-Q",
+        url: "https://www.sec.gov/Archives/edgar/data/2488/000000248826000123/amd-20260627.htm",
+        documentType: "SEC Form 10-Q",
+        publishedAt: "2026-08-05",
+        accessionNumber: "0000002488-26-000123",
+      },
+      {
+        label: "AMD filing detail",
+        url: "https://www.sec.gov/Archives/edgar/data/2488/000000248826000123/0000002488-26-000123-index.html",
+        documentType: "SEC filing index",
+        publishedAt: "2026-08-05",
+        accessionNumber: "0000002488-26-000123",
+      },
+    ],
+    evidence: {
+      title: "AMD 매출 기간별 재계산",
+      description: "원문 단위는 백만 달러입니다. 각 변화율은 같은 길이의 현재 기간과 전년 동기 값을 사용했습니다.",
+      columns: ["기간", "2026", "2025", "재계산"],
+      rows: [
+        ["Three Months Ended", "11,536", "7,685", "+50.1%"],
+        ["Six Months Ended", "21,789", "15,123", "+44.1%"],
+      ],
+    },
+    limitations: [
+      "이 표는 매출 열 연결을 검증하는 예시이며 AMD 전체 실적의 투자 판단을 제공하지 않습니다.",
+      "SEC가 수정 보고서를 제출하면 accession과 원문 수치를 다시 확인해야 합니다.",
+    ],
+    corrections: [],
     sections: [
       {
         title: "문제는 숫자가 아니라 기간 그룹입니다",
@@ -49,10 +79,46 @@ export const caseStudies = [
     title: "IonQ 실적 발표와 10-Q에서 워런트 부채 항목을 비교하는 법",
     description:
       "IonQ 사례로 8-K 실적 발표 자료와 10-Q 정식 보고서의 항목 표시 차이를 점검합니다.",
-    updated: "September 2026",
-    sourceLabel: "IonQ investor relations earnings release",
-    sourceUrl:
-      "https://investors.ionq.com/news/news-details/2026/IonQ-Announces-Record-Second-Quarter-2026-Revenues-Growing-287-YoY/default.aspx",
+    publishedAt: "2026-09-08",
+    updatedAt: "2026-10-13",
+    author: editorialAuthor,
+    sources: [
+      {
+        label: "IonQ 2026 Q2 earnings release",
+        url: "https://investors.ionq.com/news/news-details/2026/IonQ-Announces-Record-Second-Quarter-2026-Revenues-Growing-287-YoY/default.aspx",
+        documentType: "Company investor-relations release",
+        publishedAt: "2026-08-05",
+      },
+      {
+        label: "IonQ 2026 Q2 Form 10-Q",
+        url: "https://www.sec.gov/Archives/edgar/data/1824920/000119312526341001/ionq-20260630.htm",
+        documentType: "SEC Form 10-Q",
+        publishedAt: "2026-08-10",
+        accessionNumber: "0001193125-26-341001",
+      },
+      {
+        label: "IonQ filing detail",
+        url: "https://www.sec.gov/Archives/edgar/data/1824920/000119312526341001/0001193125-26-341001-index.html",
+        documentType: "SEC filing index",
+        publishedAt: "2026-08-10",
+        accessionNumber: "0001193125-26-341001",
+      },
+    ],
+    evidence: {
+      title: "IonQ 워런트 관련 표시값 비교",
+      description: "단위는 천 달러입니다. 같은 경제적 사건도 표의 기간과 현금흐름 조정 방향에 따라 부호와 금액이 달라집니다.",
+      columns: ["표", "기간", "표시값", "해석"],
+      rows: [
+        ["손익계산서", "2026년 2분기 3개월", "(1,649,115)", "워런트 부채 공정가치 변동 손실"],
+        ["현금흐름표", "2026년 상반기 6개월", "591,487", "순손실에서 비현금 손실을 되돌리는 조정"],
+        ["Non-GAAP 조정표", "2026년 2분기 3개월", "1,576,198", "워런트 등을 포함한 공정가치 측정 조정"],
+      ],
+    },
+    limitations: [
+      "세 표는 기간과 조정 범위가 달라 숫자를 서로 같은 항목으로 직접 비교할 수 없습니다.",
+      "Non-GAAP 공정가치 조정에는 워런트 이외 항목이 포함될 수 있으므로 조정표 정의를 함께 확인해야 합니다.",
+    ],
+    corrections: [],
     sections: [
       {
         title: "8-K와 10-Q는 같은 목적의 문서가 아닙니다",
@@ -82,9 +148,42 @@ export const caseStudies = [
     title: "SEC 자동 파서가 틀릴 수 있는 상황과 확인 순서",
     description:
       "자동 재무제표 추출 결과가 원문과 다르게 보일 때 사용자가 확인해야 할 실무 절차입니다.",
-    updated: "September 2026",
-    sourceLabel: "SEC EDGAR company filings",
-    sourceUrl: "https://www.sec.gov/edgar/search/",
+    publishedAt: "2026-09-08",
+    updatedAt: "2026-10-13",
+    author: editorialAuthor,
+    sources: [
+      {
+        label: "SEC EDGAR Search Filings",
+        url: "https://www.sec.gov/search-filings",
+        documentType: "SEC filing search",
+      },
+      {
+        label: "SEC Inline XBRL",
+        url: "https://www.sec.gov/data-research/structured-data/inline-xbrl",
+        documentType: "SEC structured-data guidance",
+      },
+      {
+        label: "Accessing EDGAR Data",
+        url: "https://www.sec.gov/search-filings/edgar-search-assistance/accessing-edgar-data",
+        documentType: "SEC EDGAR data access guidance",
+      },
+    ],
+    evidence: {
+      title: "파서 실패 유형과 확인 위치",
+      description: "자동 추출 결과가 원문과 다를 때 원인을 분리하기 위한 진단표입니다.",
+      columns: ["실패 유형", "화면 증상", "원문 확인 위치"],
+      rows: [
+        ["표 선택", "세그먼트 또는 조정표 값이 표시됨", "표 제목과 문서 섹션"],
+        ["기간 매핑", "등락률이 과거 열이나 누적 열에 표시됨", "다단 헤더와 날짜"],
+        ["부호", "손실이 양수로 표시됨", "괄호·항목명·XBRL sign"],
+        ["단위", "값이 1,000배 또는 1,000,000배 차이", "표 상단 단위와 주당 표시"],
+      ],
+    },
+    limitations: [
+      "진단표는 오류 유형을 분류하지만 개별 문서의 올바른 값을 자동으로 확정하지 않습니다.",
+      "XBRL 태그 자체가 잘못되거나 수정 제출된 경우에는 최신 SEC 원문을 기준으로 다시 검증해야 합니다.",
+    ],
+    corrections: [],
     sections: [
       {
         title: "표 선택 오류",

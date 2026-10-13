@@ -8,6 +8,7 @@ Date: 2026-09-27
 - The home page links to the analyzer without embedding its search, loading, result, or error states.
 - Phase 2 complete: the analyzer now lives at `/tools/sec-filing`, declares `noindex, follow`, and old root query-string entry points redirect in the browser without changing ticker or form values.
 - Phase 3 complete: the AdSense loader is limited to the publication home page and individual guide and case-study articles. Tool, stock, list, methodology, about, editorial-policy, legal, and error pages do not load it.
+- Editorial trust update complete: every retained guide and case study now displays a verified author identity, exact publication and modification dates, primary sources, an evidence table, limitations, correction status, and matching Article JSON-LD.
 
 ## Conclusion
 
@@ -18,7 +19,7 @@ Adding more generic guide pages is unlikely to resolve the rejection by itself. 
 - The live home page, guides, case studies, editorial policy, sitemap, and robots file return HTTP 200.
 - The sitemap currently exposes 12 guides and 3 case studies. Stock directory and stock detail pages are excluded from the sitemap and declare `noindex`.
 - The AdSense loader is no longer included in the root layout. It is rendered only by the publication home page and individual guide and case-study article pages.
-- Guide articles have titles, summaries, and update labels, but no named author, reviewer, citations, publication date, or structured Article metadata.
+- Retained guide and case-study articles now have a named author, primary-source citations, exact dates, visible evidence and limitations, correction status, and structured Article metadata. An independent qualified reviewer has not been claimed.
 - Most guides use the same short section-and-paragraph template and were published in a small number of batches.
 - The current Google search result for the site still shows older home-page copy describing stock pages as indexable and does not surface the new case-study pages independently. This indicates stale or incomplete indexing; it is not proof that the AdSense crawler sees the same snapshot.
 

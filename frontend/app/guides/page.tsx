@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { formatEditorialDate } from "../editorialData";
 import { guideArticles, guidePath } from "./guideData";
 
 export const metadata: Metadata = {
@@ -37,7 +38,8 @@ export default function GuidesPage() {
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div>
                   <p className="text-xs text-slate-500">
-                    Updated {article.updated} · {article.readingTime}
+                    <time dateTime={article.updatedAt}>Updated {formatEditorialDate(article.updatedAt)}</time>
+                    {" · "}{article.readingTime}
                   </p>
                   <h2 className="mt-2 text-xl font-semibold text-slate-950">
                     <Link href={guidePath(article.slug)} className="hover:underline">
