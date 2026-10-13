@@ -29,14 +29,9 @@ Set the same four environment variables as the publication project. The tool out
 
 ### Legacy tool redirect
 
-The publication build contains a 308 fallback redirect for `/tools/sec-filing`. To preserve `ticker` and `form` query parameters, also create a Cloudflare **Single Redirect** for the `finnblog.pe.kr` zone:
+The publication build contains a 308 redirect for `/tools/sec-filing`. Cloudflare Pages preserves the incoming `ticker` and `form` query parameters for this rule; no separate zone rule is required.
 
-- Incoming request: URI Path equals `/tools/sec-filing`
-- Target URL: `https://app.finnblog.pe.kr/`
-- Status code: `308`
-- Preserve query string: enabled
-
-The zone-level rule is required for query preservation; the Pages `_redirects` file is only the no-query fallback.
+If a zone-level **Single Redirect** is later added to override the Pages rule, configure URI Path `/tools/sec-filing`, target `https://app.finnblog.pe.kr/`, status `308`, and enable **Preserve query string**.
 
 If using the runtime `frontend/public/config.json` fallback, keep `apiBaseUrl` aligned with `NEXT_PUBLIC_API_BASE_URL`.
 
