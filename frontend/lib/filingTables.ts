@@ -42,6 +42,11 @@ export function annotateTableHTML(html: string, kind: AnnotateKind): string {
     return n;
   };
 
+  const pctChangeLocal = (current: number, previous: number): number | null => {
+    if (Math.abs(previous) < 1e-9) return null;
+    return (current - previous) / Math.abs(previous);
+  };
+
   const cellHasBadge = (cell: HTMLElement) => !!cell.querySelector(".delta-badge");
 
   const makeBadgeLocal = (pct: number | null, direction: number | null = pct) => {
@@ -239,7 +244,7 @@ export function annotateTableHTML(html: string, kind: AnnotateKind): string {
           const cur = parseNumLocal(curCell.textContent);
           const prev = parseNumLocal(prevCell.textContent);
           if (cur == null || prev == null || cellHasBadge(curCell)) continue;
-          const pct = prev !== 0 ? (cur - prev) / Math.abs(prev) : 0;
+          const pct = pctChangeLocal(cur, prev);
           const direction = expenseLike ? expenseDirection(cur, prev) : pct;
           curCell.appendChild(makeBadgeLocal(pct, direction));
           annotatedAny = true;
@@ -263,7 +268,7 @@ export function annotateTableHTML(html: string, kind: AnnotateKind): string {
         const curRev = parseNumLocal(curRevCell.textContent);
         const prevRev = parseNumLocal(prevRevCell.textContent);
         if (curRev != null && prevRev != null && !cellHasBadge(curRevCell)) {
-          const pct = prevRev !== 0 ? (curRev - prevRev) / Math.abs(prevRev) : 0;
+          const pct = pctChangeLocal(curRev, prevRev);
           const direction = expenseLike ? expenseDirection(curRev, prevRev) : pct;
           curRevCell.appendChild(makeBadgeLocal(pct, direction));
         }
@@ -271,7 +276,7 @@ export function annotateTableHTML(html: string, kind: AnnotateKind): string {
         const curOther = parseNumLocal(curOtherCell.textContent);
         const prevOther = parseNumLocal(prevOtherCell.textContent);
         if (curOther != null && prevOther != null && !cellHasBadge(curOtherCell)) {
-          const pct = prevOther !== 0 ? (curOther - prevOther) / Math.abs(prevOther) : 0;
+          const pct = pctChangeLocal(curOther, prevOther);
           const direction = expenseLike ? expenseDirection(curOther, prevOther) : pct;
           curOtherCell.appendChild(makeBadgeLocal(pct, direction));
         }
@@ -287,7 +292,7 @@ export function annotateTableHTML(html: string, kind: AnnotateKind): string {
         const cur = parseNumLocal(curCell.textContent);
         const prev = parseNumLocal(prevCell.textContent);
         if (cur != null && prev != null && !cellHasBadge(curCell)) {
-          const pct = prev !== 0 ? (cur - prev) / Math.abs(prev) : 0;
+          const pct = pctChangeLocal(cur, prev);
           const direction = expenseLike ? expenseDirection(cur, prev) : pct;
           curCell.appendChild(makeBadgeLocal(pct, direction));
         }
@@ -309,13 +314,13 @@ export function annotateTableHTML(html: string, kind: AnnotateKind): string {
         const prevY = parseNumLocal(prevYCell.textContent);
 
         if (curQ != null && prevQ != null && !cellHasBadge(curQCell)) {
-          const pct = prevQ !== 0 ? (curQ - prevQ) / Math.abs(prevQ) : 0;
+          const pct = pctChangeLocal(curQ, prevQ);
           const direction = expenseLike ? expenseDirection(curQ, prevQ) : pct;
           curQCell.appendChild(makeBadgeLocal(pct, direction));
         }
 
         if (curY != null && prevY != null && !cellHasBadge(curYCell)) {
-          const pct = prevY !== 0 ? (curY - prevY) / Math.abs(prevY) : 0;
+          const pct = pctChangeLocal(curY, prevY);
           const direction = expenseLike ? expenseDirection(curY, prevY) : pct;
           curYCell.appendChild(makeBadgeLocal(pct, direction));
         }
@@ -329,7 +334,7 @@ export function annotateTableHTML(html: string, kind: AnnotateKind): string {
         const cur = parseNumLocal(curCell.textContent);
         const prev = parseNumLocal(prevCell.textContent);
         if (cur == null || prev == null || cellHasBadge(curCell)) return;
-        const pct = prev !== 0 ? (cur - prev) / Math.abs(prev) : 0;
+        const pct = pctChangeLocal(cur, prev);
         const direction = expenseLike ? expenseDirection(cur, prev) : pct;
         curCell.appendChild(makeBadgeLocal(pct, direction));
       }
@@ -349,7 +354,7 @@ export function annotateTableHTML(html: string, kind: AnnotateKind): string {
         const cur = parseNumLocal(curCell.textContent);
         const prev = parseNumLocal(prevCell.textContent);
         if (cur == null || prev == null || cellHasBadge(curCell)) continue;
-        const pct = prev !== 0 ? (cur - prev) / Math.abs(prev) : 0;
+        const pct = pctChangeLocal(cur, prev);
         curCell.appendChild(makeBadgeLocal(pct));
       }
       return;
