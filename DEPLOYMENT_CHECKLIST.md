@@ -1,8 +1,8 @@
 # Deployment Checklist
 
-## Cloudflare Pages Frontends
+## Cloudflare Frontends
 
-Create two Cloudflare Pages projects from the same GitHub repository. Pin Node.js instead of relying on the platform default.
+Create two Cloudflare projects from the same GitHub repository. Pin Node.js instead of relying on the platform default.
 
 ### Publication project
 
@@ -18,14 +18,15 @@ Set these environment variables for both production and preview builds:
 - `NEXT_PUBLIC_TOOL_URL=https://app.finnblog.pe.kr`
 - `NEXT_PUBLIC_API_BASE_URL=<deployed FastAPI backend URL>`
 
-### Tool project
+### Tool project (Workers Static Assets)
 
-- Root directory: `tool-frontend`
-- Build command: `npm run build`
-- Build output directory: `out`
+- Root directory: leave blank so the build starts at the repository root
+- Build command: `npm run build:tool`
+- Deploy command: `npm run deploy:tool`
+- Static assets directory: `tool-frontend/out` (configured in `tool-frontend/wrangler.jsonc`)
 - Custom domain: `app.finnblog.pe.kr`
 
-Set the same four environment variables as the publication project. The tool output must contain only the analyzer, its 404 page, and `robots.txt`; it must not contain AdSense code or publication pages.
+Set the same four environment variables as the publication project. Do not set the root directory to `tool-frontend`: the analyzer imports shared source from `frontend`, so Cloudflare must install the root npm workspace. The tool output must contain only the analyzer, its 404 page, and `robots.txt`; it must not contain AdSense code or publication pages.
 
 ### Legacy tool redirect
 

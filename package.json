@@ -1,0 +1,14 @@
+{
+  "name": "stock-analysis-mvp",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "frontend",
+    "tool-frontend"
+  ],
+  "scripts": {
+    "build:tool": "npm run build --workspace=stock-analysis-tool-frontend",
+    "deploy:tool": "npm run deploy --workspace=stock-analysis-tool-frontend",
+    "lint:tool": "npm run lint --workspace=stock-analysis-tool-frontend"
+  }
+}

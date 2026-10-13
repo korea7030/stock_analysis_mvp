@@ -14,14 +14,16 @@ Both site URL values must be HTTP(S) origins without a path, query, hash, or cre
 
 ## Commands
 
+Run tool commands from the repository root so npm installs both frontend workspaces and shared imports resolve through the root `node_modules` directory:
+
 ```bash
 npm ci
-npm run lint
-npm run build
+npm run lint:tool
+npm run build:tool
 ```
 
 The static deployment output is `out`. It contains the tool root, 404 page, and `robots.txt`; it must not contain AdSense code or editorial routes.
 
-## Cloudflare Pages
+## Cloudflare Workers
 
-Create a second Pages project from the repository with root directory `tool-frontend`, build command `npm run build`, output directory `out`, and custom domain `app.finnblog.pe.kr`. Pin `NODE_VERSION=22.16.0` and configure all environment variables above. Full deployment and legacy redirect settings are documented in `../DEPLOYMENT_CHECKLIST.md`.
+Create the tool project from the repository with a blank root directory, build command `npm run build:tool`, deploy command `npm run deploy:tool`, and custom domain `app.finnblog.pe.kr`. `wrangler.jsonc` deploys `out` as Workers Static Assets. Pin `NODE_VERSION=22.16.0` and configure all environment variables above. Full deployment and legacy redirect settings are documented in `../DEPLOYMENT_CHECKLIST.md`.
