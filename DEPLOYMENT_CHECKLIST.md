@@ -20,13 +20,13 @@ Set these environment variables for both production and preview builds:
 
 ### Tool project (Workers Static Assets)
 
-- Root directory: leave blank so the build starts at the repository root
-- Build command: `npm run build:tool`
-- Deploy command: `npm run deploy:tool`
-- Static assets directory: `tool-frontend/out` (configured in `tool-frontend/wrangler.jsonc`)
+- Root directory: `tool-frontend`
+- Build command: `npm ci --prefix .. && npm run build`
+- Deploy command: `npm run deploy`
+- Static assets directory: `out` (configured in `wrangler.jsonc`)
 - Custom domain: `app.finnblog.pe.kr`
 
-Set the same four environment variables as the publication project. Do not set the root directory to `tool-frontend`: the analyzer imports shared source from `frontend`, so Cloudflare must install the root npm workspace. The tool output must contain only the analyzer, its 404 page, and `robots.txt`; it must not contain AdSense code or publication pages.
+Set the same four environment variables as the publication project. The build runs from `tool-frontend`, while `npm ci --prefix ..` installs the repository-root workspace so imports shared with `frontend` resolve correctly. The tool output must contain only the analyzer, its 404 page, and `robots.txt`; it must not contain AdSense code or publication pages.
 
 ### Legacy tool redirect
 

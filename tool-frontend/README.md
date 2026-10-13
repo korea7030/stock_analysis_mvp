@@ -26,4 +26,4 @@ The static deployment output is `out`. It contains the tool root, 404 page, and 
 
 ## Cloudflare Workers
 
-Create the tool project from the repository with a blank root directory, build command `npm run build:tool`, deploy command `npm run deploy:tool`, and custom domain `app.finnblog.pe.kr`. `wrangler.jsonc` deploys `out` as Workers Static Assets. Pin `NODE_VERSION=22.16.0` and configure all environment variables above. Full deployment and legacy redirect settings are documented in `../DEPLOYMENT_CHECKLIST.md`.
+Create the tool project with root directory `tool-frontend`, build command `npm ci --prefix .. && npm run build`, deploy command `npm run deploy`, and custom domain `app.finnblog.pe.kr`. The parent-prefix install prepares the repository-root npm workspace so shared imports from `frontend` resolve. `wrangler.jsonc` deploys `out` as Workers Static Assets. Pin `NODE_VERSION=22.16.0` and configure all environment variables above. Full deployment and legacy redirect settings are documented in `../DEPLOYMENT_CHECKLIST.md`.

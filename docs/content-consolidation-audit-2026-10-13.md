@@ -91,6 +91,6 @@ Resubmission should wait when editorial pages have near-zero impressions, no ret
 
 1. **Complete (2026-10-13):** Consolidate guide data and route behavior according to this audit.
 2. **Complete (2026-10-13):** Add article metadata, authorship, sources, evidence blocks, corrections, and JSON-LD.
-3. **Deployment ready (2026-10-13):** Separate the analyzer onto `app.finnblog.pe.kr`. The tool-origin contract and publication links target the app domain with query parameters preserved. The analyzer is shared by the existing route and a standalone static app with its own canonical metadata, noindex policy, dependencies, and AdSense-free output. The tool build uses a root npm workspace so clean Cloudflare builds can resolve shared dependencies, then deploys `tool-frontend/out` with Workers Static Assets. CORS defaults and the legacy redirect are live; the tool custom domain remains pending.
+3. **Complete (2026-10-13):** The analyzer is deployed at `app.finnblog.pe.kr` as a standalone static app with its own canonical metadata, noindex policy, dependencies, and AdSense-free output. Cloudflare builds from `tool-frontend`, installs the parent npm workspace with `npm ci --prefix ..`, and deploys `out` with Workers Static Assets. The custom domain, backend CORS, publication links, and legacy redirect are live with `ticker` and `form` query parameters preserved.
 4. Upgrade existing case studies and begin the six-week publication schedule.
 5. Validate indexing and audience gates before resubmission.
