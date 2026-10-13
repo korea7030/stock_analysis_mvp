@@ -91,6 +91,6 @@ Resubmission should wait when editorial pages have near-zero impressions, no ret
 
 1. **Complete (2026-10-13):** Consolidate guide data and route behavior according to this audit.
 2. **Complete (2026-10-13):** Add article metadata, authorship, sources, evidence blocks, corrections, and JSON-LD.
-3. **In progress (2026-10-13):** Separate the analyzer onto `app.finnblog.pe.kr`. The tool-origin contract and publication links now target the app domain with query parameters preserved. Target-specific build output, canonical changes, CORS, and Cloudflare deployment configuration remain pending.
+3. **In progress (2026-10-13):** Separate the analyzer onto `app.finnblog.pe.kr`. The tool-origin contract and publication links now target the app domain with query parameters preserved, and the analyzer has been extracted into a shared component without changing the existing route. The independent tool app, canonical changes, CORS, and Cloudflare deployment configuration remain pending.
 4. Upgrade existing case studies and begin the six-week publication schedule.
 5. Validate indexing and audience gates before resubmission.
