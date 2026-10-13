@@ -51,7 +51,7 @@ The page must emit matching `Article` JSON-LD. Month-only dates, build-time time
 
 ## Case-study gap
 
-The three current case studies are useful starting points but remain short and were published in one batch. Each requires exact publication and update dates, author identity, multiple primary sources where relevant, displayed calculations, limitations, and a correction history.
+The three existing case studies were materially expanded on 2026-10-13. They now include exact dates, author identity, multiple primary sources where relevant, displayed calculations, reproducible verification steps, limitations, and correction status. The AMD study documents multi-period column mapping, the IonQ study separates 8-K, 10-Q, cash-flow, and Non-GAAP contexts, and the parser study connects those failures to the implemented extraction pipeline. The related table annotation now treats a zero comparison baseline as unavailable instead of reporting a false 0% change.
 
 New case studies should be based on actual filing discrepancies or interpretation problems. Industry overview pages should not return until backed by multiple named companies and primary filings.
 
@@ -92,5 +92,5 @@ Resubmission should wait when editorial pages have near-zero impressions, no ret
 1. **Complete (2026-10-13):** Consolidate guide data and route behavior according to this audit.
 2. **Complete (2026-10-13):** Add article metadata, authorship, sources, evidence blocks, corrections, and JSON-LD.
 3. **Complete (2026-10-13):** The analyzer is deployed at `app.finnblog.pe.kr` as a standalone static app with its own canonical metadata, noindex policy, dependencies, and AdSense-free output. Cloudflare builds from `tool-frontend`, installs the parent npm workspace with `npm ci --prefix ..`, and deploys `out` with Workers Static Assets. The custom domain, backend CORS, publication links, and legacy redirect are live with `ticker` and `form` query parameters preserved.
-4. Upgrade existing case studies and begin the six-week publication schedule.
+4. **In progress (2026-10-13):** The three existing case studies satisfy the article contract. Publishing at least six additional source-backed case studies across at least six weeks remains pending.
 5. Validate indexing and audience gates before resubmission.
