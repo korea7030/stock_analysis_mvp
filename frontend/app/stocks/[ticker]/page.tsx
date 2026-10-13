@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { buildToolUrl } from "../../deploymentConfig";
 import { siteConfig, stockPath, stockProfiles } from "../../siteConfig";
 
 type StockPageProps = {
@@ -55,7 +56,7 @@ export default async function StockPage({ params }: StockPageProps) {
   const stock = getStock(ticker);
   if (!stock) notFound();
 
-  const analyzerHref = `/tools/sec-filing?ticker=${encodeURIComponent(stock.ticker)}&form=10-Q`;
+  const analyzerHref = buildToolUrl({ ticker: stock.ticker, form: "10-Q" });
   const secSearchHref = `https://www.sec.gov/edgar/search/#/q=${encodeURIComponent(stock.ticker)}`;
 
   return (

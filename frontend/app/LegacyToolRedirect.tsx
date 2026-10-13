@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import { buildToolUrl } from "./deploymentConfig";
 
 export function LegacyToolRedirect() {
   useEffect(() => {
@@ -9,7 +10,7 @@ export function LegacyToolRedirect() {
     const isLegacyToolAnchor = window.location.hash === "#sec-analyzer";
 
     if (isLegacyToolUrl || isLegacyToolAnchor) {
-      window.location.replace(`/tools/sec-filing${window.location.search}`);
+      window.location.replace(buildToolUrl(window.location.search));
     }
   }, []);
 

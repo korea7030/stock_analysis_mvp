@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 /* eslint-disable @next/next/no-html-link-for-pages -- Full reload clears AdSense on excluded routes. */
 import Link from "next/link";
 import { caseStudies, caseStudyPath } from "./case-studies/caseStudyData";
+import { buildToolUrl } from "./deploymentConfig";
 import { formatEditorialDate } from "./editorialData";
 import { guideArticles, guidePath } from "./guides/guideData";
 import { HomePublisherAdSense } from "./HomePublisherAdSense";
@@ -25,6 +26,7 @@ export default function HomePage() {
   const featuredStudy = caseStudies[0];
   const recentStudies = caseStudies.slice(1, 3);
   const featuredGuides = guideArticles.slice(0, 6);
+  const toolUrl = buildToolUrl();
 
   return (
     <main className="min-h-screen bg-slate-50">
@@ -40,7 +42,7 @@ export default function HomePage() {
               <a href="/case-studies" className="hover:text-slate-950 hover:underline">공시 분석</a>
               <a href="/guides" className="hover:text-slate-950 hover:underline">가이드</a>
               <a href="/methodology" className="hover:text-slate-950 hover:underline">방법론</a>
-              <a href="/tools/sec-filing" className="font-medium text-blue-700 hover:underline">분석 도구</a>
+              <a href={toolUrl} className="font-medium text-blue-700 hover:underline">분석 도구</a>
             </nav>
           </div>
         </header>
@@ -62,7 +64,7 @@ export default function HomePage() {
                 최신 분석 보기
               </Link>
               <a
-                href="/tools/sec-filing"
+                href={toolUrl}
                 className="inline-flex h-10 items-center justify-center rounded-lg border border-slate-300 bg-white px-4 text-sm font-medium text-slate-800 hover:border-slate-400 hover:bg-slate-50 active:translate-y-px"
               >
                 분석 도구 열기

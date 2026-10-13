@@ -1,6 +1,8 @@
+import { deploymentConfig } from "./deploymentConfig";
+
 export const siteConfig = {
   name: "SEC Filing Dashboard",
-  url: process.env.NEXT_PUBLIC_SITE_URL || "https://finnblog.pe.kr",
+  url: deploymentConfig.publicationOrigin,
   description:
     "SEC filing analysis, financial statement extraction, earnings calendar, and company filing research tools.",
 };

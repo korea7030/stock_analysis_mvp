@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 /* eslint-disable @next/next/no-html-link-for-pages -- Full reload clears AdSense on excluded routes. */
 import { notFound } from "next/navigation";
 import { ArticleByline, ArticleTrustPanel } from "../../ArticleTrustPanel";
+import { buildToolUrl } from "../../deploymentConfig";
 import { buildArticleJsonLd, formatEditorialDate, serializeJsonLd } from "../../editorialData";
 import { guideArticles, guidePath } from "../guideData";
 import { siteConfig } from "../../siteConfig";
@@ -50,6 +51,7 @@ export default async function GuidePage({ params }: GuidePageProps) {
   const article = getGuide(slug);
   if (!article) notFound();
   const jsonLd = buildArticleJsonLd({ ...article, path: guidePath(article.slug) });
+  const toolUrl = buildToolUrl();
 
   return (
     <main className="min-h-screen bg-slate-50">
@@ -95,7 +97,7 @@ export default async function GuidePage({ params }: GuidePageProps) {
             이 글은 투자 조언이 아니라 SEC 공시를 직접 검토하기 위한 교육용 자료입니다. 중요한
             숫자는 원문 SEC 보고서, 회사 IR 자료, 회계 주석과 함께 확인해야 합니다.
           </p>
-          <a href="/tools/sec-filing" className="mt-3 inline-block font-medium text-blue-700 hover:underline">
+          <a href={toolUrl} className="mt-3 inline-block font-medium text-blue-700 hover:underline">
             분석 도구로 이동
           </a>
         </footer>
