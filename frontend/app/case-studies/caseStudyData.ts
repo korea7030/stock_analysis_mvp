@@ -13,6 +13,98 @@ export type CaseStudy = EditorialArticleData & {
 
 export const caseStudies = [
   {
+    slug: "pltr-2026-q2-filing-date-vs-report-period",
+    title: "Palantir 실적 발표 뒤 최신 10-Q가 6월로 표시되는 이유",
+    description:
+      "Palantir 2026년 2분기 8-K와 10-Q를 대조해 제출일, 실적 발표일, 보고기간 종료일을 구분하는 방법을 설명합니다.",
+    publishedAt: "2026-10-25",
+    updatedAt: "2026-10-25",
+    author: editorialAuthor,
+    sources: [
+      {
+        label: "Palantir 2026 Q2 earnings Form 8-K",
+        url: "https://www.sec.gov/Archives/edgar/data/1321655/000132165526000039/0001321655-26-000039-index.html",
+        documentType: "SEC Form 8-K filing index",
+        publishedAt: "2026-08-03",
+        accessionNumber: "0001321655-26-000039",
+      },
+      {
+        label: "Palantir 2026 Q2 earnings release exhibit",
+        url: "https://www.sec.gov/Archives/edgar/data/1321655/000132165526000039/a2026q2ex991pressrelease.htm",
+        documentType: "SEC Form 8-K Exhibit 99.1",
+        publishedAt: "2026-08-03",
+        accessionNumber: "0001321655-26-000039",
+      },
+      {
+        label: "Palantir 2026 Q2 Form 10-Q filing index",
+        url: "https://www.sec.gov/Archives/edgar/data/1321655/000132165526000041/0001321655-26-000041-index.html",
+        documentType: "SEC Form 10-Q filing index",
+        publishedAt: "2026-08-04",
+        accessionNumber: "0001321655-26-000041",
+      },
+      {
+        label: "Palantir 2026 Q2 Form 10-Q",
+        url: "https://www.sec.gov/Archives/edgar/data/1321655/000132165526000041/pltr-20260630.htm",
+        documentType: "SEC Form 10-Q",
+        publishedAt: "2026-08-04",
+        accessionNumber: "0001321655-26-000041",
+      },
+      {
+        label: "Palantir SEC submissions checked 2026-10-25",
+        url: "https://data.sec.gov/submissions/CIK0001321655.json",
+        documentType: "SEC company submissions feed",
+        publishedAt: "2026-10-25",
+      },
+    ],
+    evidence: {
+      title: "Palantir 2026년 2분기 제출 순서",
+      description:
+        "보고기간 종료일과 SEC 제출일은 서로 다른 날짜입니다. 10-Q의 6월 표시는 오래된 문서를 뜻하지 않습니다.",
+      columns: ["문서", "SEC 제출일", "재무 보고기간", "판정"],
+      rows: [
+        ["실적 8-K", "2026-08-03", "2026-06-30 종료 분기", "Exhibit 99.1로 실적 발표"],
+        ["분기 10-Q", "2026-08-04", "2026-06-30 종료 분기", "분기말 35일 뒤 제출"],
+        ["10월 25일 제출 목록", "2026-10-25 확인", "후속 10-Q 없음", "6월 30일 보고서가 최신"],
+      ],
+    },
+    limitations: [
+      "이 글은 2026년 10월 25일 SEC 제출 목록을 기준으로 하며 이후 제출된 보고서는 반영하지 않습니다.",
+      "8-K cover의 report date는 실적 대상 분기말과 다를 수 있으므로 Exhibit 99.1의 기간을 함께 확인해야 합니다.",
+      "10-Q가 최신이라는 사실은 데이터가 실시간이라는 뜻이 아니며 재무제표는 명시된 보고기간까지만 다룹니다.",
+    ],
+    corrections: [],
+    sections: [
+      {
+        title: "최신 보고서는 제출일과 보고기간을 함께 봐야 합니다",
+        body: [
+          "Palantir의 2026년 2분기 10-Q는 8월 4일 제출됐지만 문서 제목과 cover에는 'quarterly period ended June 30, 2026'이라고 적혀 있습니다. 6월은 제출월이 아니라 재무제표가 끝나는 기준일입니다.",
+          "따라서 10월에 조회해도 6월 30일 보고서가 최신일 수 있습니다. 최신 여부는 화면에 보이는 월만 보지 않고 같은 form의 accession과 filing date를 SEC 제출 목록에서 비교해야 합니다.",
+        ],
+      },
+      {
+        title: "8-K와 10-Q는 같은 실적을 다른 방식으로 전달합니다",
+        body: [
+          "Palantir은 8월 3일 Item 2.02 8-K를 제출하고 Exhibit 99.1에 6월 30일 종료 분기 실적을 첨부했습니다. 다음 날 제출한 10-Q는 같은 분기를 대상으로 재무제표, 주석, 경영진 논의를 더 상세하게 제공합니다.",
+          "8-K가 하루 먼저 나왔다고 해서 10-Q의 보고기간이 8월로 바뀌지는 않습니다. 8-K의 제출일과 첨부 실적의 대상 기간을 하나의 날짜로 합치면 최신 보고서 판단이 틀어집니다.",
+        ],
+      },
+      {
+        title: "SEC 제출 목록으로 누락 여부를 재현합니다",
+        body: [
+          "CIK 0001321655의 SEC submissions feed에서 form이 10-Q인 행만 시간순으로 정렬하면 2026년 8월 4일 accession 0001321655-26-000041이 10월 25일 기준 가장 최근 항목입니다. 그 뒤의 Form 4나 Form 144는 분기보고서가 아닙니다.",
+          "검증 순서는 ticker를 CIK로 변환하고, form을 정확히 10-Q로 제한하고, filing date 내림차순 첫 accession을 선택한 뒤 primary document의 period ended를 읽는 것입니다.",
+        ],
+      },
+      {
+        title: "화면에는 두 날짜를 분리해서 표시해야 합니다",
+        body: [
+          "검색 결과에는 '보고기간 2026-06-30'과 '제출일 2026-08-04'를 따로 표시해야 합니다. 하나의 '날짜' 필드만 보여주면 사용자는 6월 제출 자료로 오해하거나 8월 실적 기간으로 잘못 해석할 수 있습니다.",
+          "SEC 요청 실패나 제출 목록 파싱 실패 때는 저장된 문서를 최신이라고 단정하지 않아야 합니다. 마지막 확인 시각과 데이터 출처를 표시하고 최신 여부를 확인할 수 없다는 상태로 처리하는 편이 안전합니다.",
+        ],
+      },
+    ],
+  },
+  {
     slug: "aapl-2026-q3-balance-sheet-date-order",
     title: "Apple 8-K 재무상태표에서 최신 날짜 열을 판별하는 법",
     description:

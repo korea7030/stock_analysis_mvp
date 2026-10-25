@@ -60,7 +60,7 @@ New case studies should be based on actual filing discrepancies or interpretatio
 | Release | Publication date | Status | Case study |
 | --- | --- | --- | --- |
 | 1 | 2026-10-18 | Complete | Apple 8-K balance-sheet date ordering |
-| 2 | 2026-10-25 | Planned | Source verification pending |
+| 2 | 2026-10-25 | Complete | Palantir filing date versus report period |
 | 3 | 2026-11-01 | Planned | Source verification pending |
 | 4 | 2026-11-08 | Planned | Source verification pending |
 | 5 | 2026-11-15 | Planned | Source verification pending |
@@ -105,5 +105,5 @@ Resubmission should wait when editorial pages have near-zero impressions, no ret
 1. **Complete (2026-10-13):** Consolidate guide data and route behavior according to this audit.
 2. **Complete (2026-10-13):** Add article metadata, authorship, sources, evidence blocks, corrections, and JSON-LD.
 3. **Complete (2026-10-13):** The analyzer is deployed at `app.finnblog.pe.kr` as a standalone static app with its own canonical metadata, noindex policy, dependencies, and AdSense-free output. Cloudflare builds from `tool-frontend`, installs the parent npm workspace with `npm ci --prefix ..`, and deploys `out` with Workers Static Assets. The custom domain, backend CORS, publication links, and legacy redirect are live with `ticker` and `form` query parameters preserved.
-4. **In progress (2026-10-18):** The three existing case studies satisfy the article contract. One of six additional source-backed case studies has been published; five releases and the remaining six-week interval are pending.
+4. **In progress (2026-10-25):** The three existing case studies satisfy the article contract. Two of six additional source-backed case studies have been published; four releases and the remaining six-week interval are pending.
 5. Validate indexing and audience gates before resubmission.
