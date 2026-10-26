@@ -95,6 +95,10 @@ jobs:
 
           mkdir -p .codex-triage
 
+          sanitize_workflow_commands() {
+            sed -e 's/##\[/## [/g' -e 's/::/: :/g'
+          }
+
           {
             echo "# Production triage input"
             echo
@@ -108,16 +112,18 @@ jobs:
             fi
             echo "- Current SHA: ${GITHUB_SHA}"
             echo
-          } > .codex-triage/context.md
+          } | sanitize_workflow_commands > .codex-triage/context.md
 
           gh run view "$RUN_ID" --json \
             name,event,status,conclusion,createdAt,updatedAt,headBranch,headSha,url \
-            > .codex-triage/run.json
+            | sanitize_workflow_commands > .codex-triage/run.json
 
-          gh run view "$RUN_ID" --log > .codex-triage/monitor-run.log
+          gh run view "$RUN_ID" --log \
+            | sanitize_workflow_commands > .codex-triage/monitor-run.log
 
           if gh run download "$RUN_ID" --name production-monitor-summary --dir .codex-triage/artifacts; then
             find .codex-triage/artifacts -maxdepth 3 -type f -print -exec sed -n '1,240p' {} \; \
+              | sanitize_workflow_commands \
               > .codex-triage/artifact-summary.txt
           else
             echo "production-monitor-summary artifact was not available." > .codex-triage/artifact-summary.txt
@@ -133,7 +139,7 @@ jobs:
             sed -n '1,240p' .github/workflows/deploy-backend.yml
             echo
             sed -n '1,220p' .github/workflows/prewarm-cache.yml
-          } > .codex-triage/repo-context.md
+          } | sanitize_workflow_commands > .codex-triage/repo-context.md
 
       - name: Validate Codex secret
         if: steps.resolve.outputs.should_run == 'true'
