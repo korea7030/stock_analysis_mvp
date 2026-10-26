@@ -27,7 +27,7 @@ jobs:
     steps:
       - name: Resolve remediation request
         id: resolve
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           script: |
             const { owner, repo } = context.repo;
@@ -113,7 +113,7 @@ jobs:
 
       - name: Checkout code
         if: steps.resolve.outputs.should_run == 'true'
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 30
 
@@ -138,6 +138,10 @@ jobs:
 
           mkdir -p .codex-remediation
 
+          sanitize_workflow_commands() {
+            sed -e 's/##\[/## [/g' -e 's/::/: :/g'
+          }
+
           {
             echo "# Codex remediation input"
             echo
@@ -151,23 +155,26 @@ jobs:
             fi
             echo "- Current SHA: ${GITHUB_SHA}"
             echo
-          } > .codex-remediation/context.md
+          } | sanitize_workflow_commands > .codex-remediation/context.md
 
           gh run view "$RUN_ID" --json \
             name,event,status,conclusion,createdAt,updatedAt,headBranch,headSha,url \
-            > .codex-remediation/monitor-run.json
+            | sanitize_workflow_commands > .codex-remediation/monitor-run.json
 
-          gh run view "$RUN_ID" --log > .codex-remediation/monitor-run.log
+          gh run view "$RUN_ID" --log \
+            | sanitize_workflow_commands > .codex-remediation/monitor-run.log
 
           if gh run download "$RUN_ID" --name production-monitor-summary --dir .codex-remediation/artifacts; then
             find .codex-remediation/artifacts -maxdepth 3 -type f -print -exec sed -n '1,240p' {} \; \
+              | sanitize_workflow_commands \
               > .codex-remediation/artifact-summary.txt
           else
             echo "production-monitor-summary artifact was not available." > .codex-remediation/artifact-summary.txt
           fi
 
           if [ -n "${ISSUE_NUMBER}" ]; then
-            gh issue view "$ISSUE_NUMBER" --comments > .codex-remediation/issue.md
+            gh issue view "$ISSUE_NUMBER" --comments \
+              | sanitize_workflow_commands > .codex-remediation/issue.md
           else
             echo "No alert issue was provided or found." > .codex-remediation/issue.md
           fi
@@ -185,7 +192,7 @@ jobs:
             sed -n '1,240p' .github/workflows/deploy-backend.yml
             echo
             sed -n '1,240p' .github/workflows/codex-production-triage.yml
-          } > .codex-remediation/repo-context.md
+          } | sanitize_workflow_commands > .codex-remediation/repo-context.md
 
       - name: Validate Codex secret
         if: steps.resolve.outputs.should_run == 'true'
@@ -350,7 +357,7 @@ jobs:
 
       - name: Comment remediation result
         if: always() && steps.resolve.outputs.should_run == 'true' && steps.resolve.outputs.issue_number != ''
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         env:
           ISSUE_NUMBER: ${{ steps.resolve.outputs.issue_number }}
           HAS_CHANGES: ${{ steps.changes.outputs.has_changes }}
@@ -390,7 +397,7 @@ jobs:
 
       - name: Upload remediation artifacts
         if: always() && steps.resolve.outputs.should_run == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: codex-remediation
           path: |
