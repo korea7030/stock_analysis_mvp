@@ -195,6 +195,7 @@ jobs:
           path: |
             codex-production-triage.md
             .codex-triage/
+          include-hidden-files: true
           if-no-files-found: warn
 
       - name: Comment triage on alert issue
