@@ -403,4 +403,5 @@ jobs:
           path: |
             codex-remediation-report.md
             .codex-remediation/
+          include-hidden-files: true
           if-no-files-found: warn
