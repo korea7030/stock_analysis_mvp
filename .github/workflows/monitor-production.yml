@@ -7,6 +7,10 @@ name: Monitor Production
         description: "Production frontend URL"
         required: false
         default: "https://finnblog.pe.kr"
+      tool_url:
+        description: "Production analysis tool URL"
+        required: false
+        default: "https://app.finnblog.pe.kr"
       api_base_url:
         description: "Production backend API base URL"
         required: false
@@ -16,6 +20,7 @@ name: Monitor Production
 
 env:
   SITE_URL: ${{ github.event.inputs.site_url || vars.PRODUCTION_SITE_URL || 'https://finnblog.pe.kr' }}
+  TOOL_URL: ${{ github.event.inputs.tool_url || vars.PRODUCTION_TOOL_URL || 'https://app.finnblog.pe.kr' }}
   API_BASE_URL: ${{ github.event.inputs.api_base_url || vars.PRODUCTION_API_BASE_URL || 'https://stock-backend-api-344913823090.us-central1.run.app' }}
   SMOKE_TICKER: ${{ vars.MONITOR_SMOKE_TICKER || 'AAPL' }}
   SMOKE_FORM: ${{ vars.MONITOR_SMOKE_FORM || '10-Q' }}
@@ -42,6 +47,9 @@ jobs:
           : > "$SUMMARY_FILE"
 
           fail_count=0
+          site_origin="${SITE_URL%/}"
+          tool_origin="${TOOL_URL%/}"
+          api_origin="${API_BASE_URL%/}"
 
           add_line() {
             printf '%s\n' "$1" | tee -a "$SUMMARY_FILE"
@@ -52,6 +60,8 @@ jobs:
             local url="$2"
             local timeout_s="$3"
             local expected="${4:-}"
+            local expected_status="${5:-2xx}"
+            local forbidden="${6:-}"
 
             local body_file
             body_file="$(mktemp)"
@@ -81,7 +91,8 @@ jobs:
               return
             fi
 
-            if [ "$http_code" -lt 200 ] || [ "$http_code" -ge 300 ]; then
+            if { [ "$expected_status" = "2xx" ] && { [ "$http_code" -lt 200 ] || [ "$http_code" -ge 300 ]; }; } || \
+              { [ "$expected_status" != "2xx" ] && [ "$http_code" != "$expected_status" ]; }; then
               add_line "- ❌ ${name}: HTTP ${http_code} elapsed=${elapsed_ms}ms url=${url}"
               add_line "  body: $(head -c 300 "$body_file" | tr '\n' ' ')"
               fail_count=$((fail_count + 1))
@@ -97,24 +108,38 @@ jobs:
               return
             fi
 
+            if [ -n "$forbidden" ] && grep -Fq "$forbidden" "$body_file"; then
+              add_line "- ❌ ${name}: forbidden text found (${forbidden}) elapsed=${elapsed_ms}ms url=${url}"
+              fail_count=$((fail_count + 1))
+              rm -f "$body_file"
+              return
+            fi
+
             add_line "- ✅ ${name}: HTTP ${http_code} elapsed=${elapsed_ms}ms"
             rm -f "$body_file"
           }
 
           add_line "# Production monitor"
           add_line ""
-          add_line "- Site: ${SITE_URL}"
-          add_line "- API: ${API_BASE_URL}"
+          add_line "- Site: ${site_origin}"
+          add_line "- Tool: ${tool_origin}"
+          add_line "- API: ${api_origin}"
           add_line "- Smoke ticker/form: ${SMOKE_TICKER}/${SMOKE_FORM}"
           add_line "- Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
           add_line ""
           add_line "## Checks"
 
-          check_url "frontend home" "${SITE_URL}/" 20 "SEC Filing Dashboard"
-          check_url "frontend sitemap" "${SITE_URL}/sitemap.xml" 20 "<urlset"
-          check_url "backend health" "${API_BASE_URL}/health" 15 '"status":"ok"'
-          check_url "backend calendar" "${API_BASE_URL}/calendar?weeks=1&kind=all" 45
-          check_url "backend analyze smoke" "${API_BASE_URL}/analyze?ticker=${SMOKE_TICKER}&form=${SMOKE_FORM}" 120 '"ticker"'
+          check_url "frontend home canonical" "${site_origin}/" 20 "rel=\"canonical\" href=\"${site_origin}\""
+          check_url "frontend robots" "${site_origin}/robots.txt" 20 "Sitemap: ${site_origin}/sitemap.xml"
+          check_url "frontend sitemap" "${site_origin}/sitemap.xml" 20 "<urlset"
+          check_url "editorial AdSense" "${site_origin}/guides/10q-10k-8k-difference" 20 "pagead2.googlesyndication.com/pagead/js/adsbygoogle.js"
+          check_url "frontend 404" "${site_origin}/__monitor_missing__" 20 'name="robots" content="noindex"' 404 "pagead2.googlesyndication.com/pagead/js/adsbygoogle.js"
+          check_url "tool home" "${tool_origin}/" 20 'name="robots" content="noindex, follow"' 2xx "pagead2.googlesyndication.com/pagead/js/adsbygoogle.js"
+          check_url "tool 404" "${tool_origin}/__monitor_missing__" 20 'name="robots" content="noindex"' 404 "pagead2.googlesyndication.com/pagead/js/adsbygoogle.js"
+          check_url "legacy tool route" "${site_origin}/?ticker=${SMOKE_TICKER}&form=${SMOKE_FORM}" 20 "${tool_origin}/" 2xx
+          check_url "backend health" "${api_origin}/health" 15 '"status":"ok"'
+          check_url "backend calendar" "${api_origin}/calendar?weeks=1&kind=all" 45
+          check_url "backend analyze smoke" "${api_origin}/analyze?ticker=${SMOKE_TICKER}&form=${SMOKE_FORM}" 120 '"ticker"'
 
           add_line ""
           if [ "$fail_count" -gt 0 ]; then
