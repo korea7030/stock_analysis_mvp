@@ -263,6 +263,10 @@ def sec_company_filings_url(*, ticker: str | None, form_type: str) -> str | None
     return "https://www.sec.gov/cgi-bin/browse-edgar?" + urllib.parse.urlencode(params)
 
 
+_SEC_METADATA_CACHE: TTLCache[list[Any]] = TTLCache()
+_SEC_METADATA_RATE_LIMIT_FALLBACK: TTLCache[list[Any]] = TTLCache()
+
+
 def sec_get_filing_metadatas(
     dl: Any,
     *,
@@ -270,6 +274,11 @@ def sec_get_filing_metadatas(
     form: str,
     limit: int,
 ) -> list[Any]:
+    cache_key = f"{ticker.strip().upper()}:{form}:{limit}"
+    cached = _SEC_METADATA_CACHE.get(cache_key)
+    if cached is not None:
+        return list(cached)
+
     def _call() -> list[Any]:
         t0 = time.time()
         _limiter_acquire(SEC_LIMITER, "sec")
@@ -282,7 +291,22 @@ def sec_get_filing_metadatas(
         query = RequestedFilings(ticker_or_cik=ticker, form_type=form, limit=limit)
         return list(dl.get_filing_metadatas(query))
 
-    return _retry(_call, attempts=3, base_sleep_s=0.5, max_sleep_s=4.0, label="sec_metadata")
+    try:
+        metadatas = _retry(_call, attempts=3, base_sleep_s=0.5, max_sleep_s=4.0, label="sec_metadata")
+    except Exception as exc:
+        # Use only a recent successful lookup when SEC throttles us. Never
+        # extend its lifetime on failure or hide unrelated provider errors.
+        if _exception_status_code(exc) == 429:
+            fallback = _SEC_METADATA_RATE_LIMIT_FALLBACK.get(cache_key)
+            if fallback is not None:
+                print(f"[sec_metadata] rate_limit_cache_fallback=true key={cache_key}")
+                return list(fallback)
+        raise
+
+    if metadatas:
+        _SEC_METADATA_CACHE.set(cache_key, list(metadatas), ttl_s=300)
+        _SEC_METADATA_RATE_LIMIT_FALLBACK.set(cache_key, list(metadatas), ttl_s=3600)
+    return metadatas
 
 
 def sec_download_filing_url(dl: Any, *, url: str) -> str:
