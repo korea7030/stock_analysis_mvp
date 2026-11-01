@@ -2,8 +2,6 @@ name: Prewarm Analysis Cache
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: "17 */6 * * *"
 
 env:
   PREWARM_TICKERS: ${{ vars.PREWARM_TICKERS || 'AAPL,MSFT,NVDA,GOOGL,AMZN,META,TSLA,AVGO,JPM,LLY,V,UNH,MA,XOM,COST' }}
