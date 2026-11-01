@@ -6,6 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 - `backend/` — SEC 보고서를 다운로드하고 재무제표를 추출하며 실적 발표 캘린더를 노출하는 FastAPI 서비스.
 - `frontend/` — Next.js 16 앱 (TypeScript + Tailwind, 정적 `output: "export"` 모드).
+- `tool-frontend/` — SEC 분석 도구 전용 Next.js 앱. `frontend/` 의 공유 컴포넌트를 직접 import 하므로 루트 `package.json` 이 공유 UI 런타임과 React 타입 의존성을 함께 선언함.
 - `main.py`, `downloader.py` — 저장소 루트에 있는 레거시/단독 스크립트. 실제 운영 서비스의 정본은 `backend/`.
 - `requirements.txt` (루트) 와 `backend/requirements.txt` — 백엔드 Dockerfile은 `backend/requirements.txt` 만 설치함.
 

@@ -6,6 +6,14 @@
     "frontend",
     "tool-frontend"
   ],
+  "dependencies": {
+    "dompurify": "^3.3.2",
+    "recharts": "^2.15.4"
+  },
+  "devDependencies": {
+    "@types/react": "^19",
+    "@types/react-dom": "^19"
+  },
   "scripts": {
     "build:tool": "npm run build --workspace=stock-analysis-tool-frontend",
     "deploy:tool": "npm run deploy --workspace=stock-analysis-tool-frontend",
