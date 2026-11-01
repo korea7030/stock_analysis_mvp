@@ -78,7 +78,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ### 캐싱
 
 두 계층:
-- `backend/cache.py::TTLCache` — 프로세스 로컬, 스레드 안전. `analyze`, `earnings`, SEC 티커→CIK 맵, SEC accession 인덱스에 사용.
+- `backend/cache.py::TTLCache` — 프로세스 로컬, 스레드 안전. 선택적 최대 용량을 넘으면 LRU 항목을 제거하고 쓰기 시 만료 항목을 정리함. SEC 메타데이터는 `ticker+form` 공통 키와 키 분산 잠금을 사용해 `limit=1` 최신 확인과 실제 분석이 같은 목록을 공유함.
 - `backend/postgres_store.py::section_history` — MD&A / 위험요인 공시간 차분을 위한 선택적 테이블. 현재 `extract_sections` 가 모두 `None` 을 반환하므로 이 경로는 휴면 상태. 섹션 추출을 다시 켤 경우 `save_section_history` 로 기록하고 다음 호출에서 읽어 사용할 것.
 
 ### 프론트엔드
