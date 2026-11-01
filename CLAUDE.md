@@ -6,6 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 - `backend/` — SEC 보고서를 다운로드하고 재무제표를 추출하며 실적 발표 캘린더를 노출하는 FastAPI 서비스.
 - `frontend/` — Next.js 16 앱 (TypeScript + Tailwind, 정적 `output: "export"` 모드).
+- `tool-frontend/` — SEC 분석 도구 전용 Next.js 앱. `frontend/` 의 공유 컴포넌트를 직접 import 하므로 루트 `package.json` 이 공유 UI 런타임과 React 타입 의존성을 함께 선언함.
 - `main.py`, `downloader.py` — 저장소 루트에 있는 레거시/단독 스크립트. 실제 운영 서비스의 정본은 `backend/`.
 - `requirements.txt` (루트) 와 `backend/requirements.txt` — 백엔드 Dockerfile은 `backend/requirements.txt` 만 설치함.
 
@@ -78,7 +79,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ### 캐싱
 
 두 계층:
-- `backend/cache.py::TTLCache` — 프로세스 로컬, 스레드 안전. `analyze`, `earnings`, SEC 티커→CIK 맵, SEC accession 인덱스에 사용.
+- `backend/cache.py::TTLCache` — 프로세스 로컬, 스레드 안전. 선택적 최대 용량을 넘으면 LRU 항목을 제거하고 쓰기 시 만료 항목을 정리함. SEC 메타데이터는 `ticker+form` 공통 키와 키 분산 잠금을 사용해 `limit=1` 최신 확인과 실제 분석이 같은 목록을 공유함.
 - `backend/postgres_store.py::section_history` — MD&A / 위험요인 공시간 차분을 위한 선택적 테이블. 현재 `extract_sections` 가 모두 `None` 을 반환하므로 이 경로는 휴면 상태. 섹션 추출을 다시 켤 경우 `save_section_history` 로 기록하고 다음 호출에서 읽어 사용할 것.
 
 ### 프론트엔드

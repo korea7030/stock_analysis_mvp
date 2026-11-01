@@ -5,6 +5,7 @@ import os
 import concurrent.futures
 import threading
 import urllib.parse
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Callable, Optional, TypeVar
 
@@ -263,6 +264,17 @@ def sec_company_filings_url(*, ticker: str | None, form_type: str) -> str | None
     return "https://www.sec.gov/cgi-bin/browse-edgar?" + urllib.parse.urlencode(params)
 
 
+@dataclass(frozen=True)
+class _SecMetadataCacheEntry:
+    items: tuple[Any, ...]
+    fetched_limit: int
+
+
+_SEC_METADATA_CACHE: TTLCache[_SecMetadataCacheEntry] = TTLCache(max_entries=512)
+_SEC_METADATA_RATE_LIMIT_FALLBACK: TTLCache[_SecMetadataCacheEntry] = TTLCache(max_entries=512)
+_SEC_METADATA_LOCKS = tuple(threading.Lock() for _ in range(64))
+
+
 def sec_get_filing_metadatas(
     dl: Any,
     *,
@@ -270,19 +282,48 @@ def sec_get_filing_metadatas(
     form: str,
     limit: int,
 ) -> list[Any]:
-    def _call() -> list[Any]:
-        t0 = time.time()
-        _limiter_acquire(SEC_LIMITER, "sec")
-        waited_s = time.time() - t0
-        rate_limited = waited_s >= 0.01
-        print(
-            f"[sec_metadata] ticker={ticker} form={form} limit={limit} "
-            f"rate_limited={rate_limited} waited_s={waited_s:.3f}"
-        )
-        query = RequestedFilings(ticker_or_cik=ticker, form_type=form, limit=limit)
-        return list(dl.get_filing_metadatas(query))
+    cache_key = f"{ticker.strip().upper()}:{form.strip().upper()}"
+    cached = _SEC_METADATA_CACHE.get(cache_key)
+    if cached is not None and cached.fetched_limit >= limit:
+        return list(cached.items[:limit])
 
-    return _retry(_call, attempts=3, base_sleep_s=0.5, max_sleep_s=4.0, label="sec_metadata")
+    cache_lock = _SEC_METADATA_LOCKS[hash(cache_key) % len(_SEC_METADATA_LOCKS)]
+    with cache_lock:
+        cached = _SEC_METADATA_CACHE.get(cache_key)
+        if cached is not None and cached.fetched_limit >= limit:
+            return list(cached.items[:limit])
+
+        fetch_limit = max(limit, int(os.getenv("SEC_MAX_FILINGS", "5")))
+
+        def _call() -> list[Any]:
+            t0 = time.time()
+            _limiter_acquire(SEC_LIMITER, "sec")
+            waited_s = time.time() - t0
+            rate_limited = waited_s >= 0.01
+            print(
+                f"[sec_metadata] ticker={ticker} form={form} limit={fetch_limit} "
+                f"rate_limited={rate_limited} waited_s={waited_s:.3f}"
+            )
+            query = RequestedFilings(ticker_or_cik=ticker, form_type=form, limit=fetch_limit)
+            return list(dl.get_filing_metadatas(query))
+
+        try:
+            metadatas = _retry(_call, attempts=3, base_sleep_s=0.5, max_sleep_s=4.0, label="sec_metadata")
+        except Exception as exc:
+            # Use only a recent successful lookup when SEC throttles us. Never
+            # extend its lifetime on failure or hide unrelated provider errors.
+            if _exception_status_code(exc) == 429:
+                fallback = _SEC_METADATA_RATE_LIMIT_FALLBACK.get(cache_key)
+                if fallback is not None and fallback.fetched_limit >= limit:
+                    print(f"[sec_metadata] rate_limit_cache_fallback=true key={cache_key}")
+                    return list(fallback.items[:limit])
+            raise
+
+        if metadatas:
+            entry = _SecMetadataCacheEntry(items=tuple(metadatas), fetched_limit=fetch_limit)
+            _SEC_METADATA_CACHE.set(cache_key, entry, ttl_s=300)
+            _SEC_METADATA_RATE_LIMIT_FALLBACK.set(cache_key, entry, ttl_s=3600)
+        return metadatas[:limit]
 
 
 def sec_download_filing_url(dl: Any, *, url: str) -> str:
