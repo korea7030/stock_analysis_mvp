@@ -2,6 +2,7 @@ from __future__ import annotations
 
 # pyright: basic, reportMissingImports=false
 
+import threading
 from datetime import date
 
 import backend.clients as clients
@@ -184,6 +185,70 @@ def test_nasdaq_economic_calendar_sets_status_and_importance(monkeypatch):
     assert items[0]["importance"] == "high"
     assert items[0]["actual"] is None
     assert items[0]["consensus"] == "0.2%"
+
+
+def test_limited_weekly_earnings_fetches_days_concurrently(monkeypatch):
+    barrier = threading.Barrier(2)
+    concurrent_fetch = threading.Event()
+    monkeypatch.setenv("CALENDAR_FETCH_WORKERS", "2")
+
+    def _fake_fetch(report_date, **_kwargs):
+        try:
+            barrier.wait(timeout=0.5)
+            concurrent_fetch.set()
+        except threading.BrokenBarrierError:
+            pass
+        return [{"ticker": report_date.isoformat(), "report_date": report_date.isoformat(), "status": "upcoming"}]
+
+    monkeypatch.setattr(clients, "nasdaq_get_earnings_for_date", _fake_fetch)
+
+    items = clients.nasdaq_get_weekly_earnings(anchor_date=date(2026, 3, 11), limit=2, include_links=False)
+
+    assert concurrent_fetch.is_set()
+    assert len(items) == 2
+
+
+def test_limited_weekly_economic_calendar_fetches_days_concurrently(monkeypatch):
+    barrier = threading.Barrier(2)
+    concurrent_fetch = threading.Event()
+    monkeypatch.setenv("CALENDAR_FETCH_WORKERS", "2")
+
+    def _fake_fetch(report_date):
+        try:
+            barrier.wait(timeout=0.5)
+            concurrent_fetch.set()
+        except threading.BrokenBarrierError:
+            pass
+        return [{"event": report_date.isoformat(), "event_date": report_date.isoformat(), "status": "upcoming"}]
+
+    monkeypatch.setattr(clients, "nasdaq_get_economic_calendar_for_date", _fake_fetch)
+
+    items = clients.nasdaq_get_weekly_economic_calendar(anchor_date=date(2026, 3, 11), limit=2)
+
+    assert concurrent_fetch.is_set()
+    assert len(items) == 2
+
+
+def test_limited_weekly_earnings_keeps_partial_results(monkeypatch):
+    def _fake_fetch(report_date, **_kwargs):
+        if report_date == date(2026, 3, 11):
+            raise TimeoutError("provider timeout")
+        return [{"ticker": "OK", "report_date": report_date.isoformat(), "status": "upcoming"}]
+
+    monkeypatch.setattr(clients, "nasdaq_get_earnings_for_date", _fake_fetch)
+
+    items = clients.nasdaq_get_weekly_earnings(anchor_date=date(2026, 3, 11), limit=2, include_links=False)
+
+    assert len(items) == 2
+    assert all(item["ticker"] == "OK" for item in items)
+
+
+def test_limited_weekly_economic_calendar_allows_empty_results(monkeypatch):
+    monkeypatch.setattr(clients, "nasdaq_get_economic_calendar_for_date", lambda _report_date: [])
+
+    items = clients.nasdaq_get_weekly_economic_calendar(anchor_date=date(2026, 3, 11), limit=2)
+
+    assert items == []
 
 
 def test_seekingalpha_transcripts_url_preserves_colon():
