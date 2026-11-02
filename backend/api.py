@@ -60,6 +60,7 @@ ANALYZE_CACHE_VALIDATE_LATEST = os.getenv("ANALYZE_CACHE_VALIDATE_LATEST", "true
 _earnings_cache: TTLCache[list[dict[str, Any]]] = TTLCache()
 _earnings_last_success: list[dict[str, Any]] | None = None
 _calendar_cache: TTLCache[list[dict[str, Any]]] = TTLCache()
+_calendar_locks = tuple(threading.Lock() for _ in range(64))
 _analyze_cache: TTLCache[dict[str, Any]] = TTLCache()
 _rate_limiter = SlidingWindowRateLimiter()
 
@@ -533,6 +534,36 @@ def calendar(
         _calendar_cache.set(cache_key, persistent_payload, EARNINGS_CACHE_TTL_S)
         return persistent_payload
 
+    cache_lock = _calendar_locks[hash(cache_key) % len(_calendar_locks)]
+    with cache_lock:
+        cached_payload = _calendar_cache.get(cache_key)
+        if cached_payload is not None:
+            return cached_payload
+        persistent_payload = load_response_cache(cache_key=cache_key)
+        if isinstance(persistent_payload, list):
+            _calendar_cache.set(cache_key, persistent_payload, EARNINGS_CACHE_TTL_S)
+            return persistent_payload
+        return _fetch_calendar_payload(
+            cache_key=cache_key,
+            weeks=weeks,
+            kind=kind,
+            status=status,
+            country=country,
+            importance=importance,
+            ticker=ticker,
+        )
+
+
+def _fetch_calendar_payload(
+    *,
+    cache_key: str,
+    weeks: int,
+    kind: Optional[str],
+    status: Optional[str],
+    country: Optional[str],
+    importance: Optional[str],
+    ticker: Optional[str],
+) -> list[dict[str, Any]]:
     today = get_logical_today()
     start_date = today - timedelta(days=today.weekday())
     end_date = start_date + timedelta(days=7 * weeks - 1)

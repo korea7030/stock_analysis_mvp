@@ -670,30 +670,11 @@ def nasdaq_get_weekly_earnings(
         now_et = None
 
     earnings: list[dict[str, Any]] = []
+    fetch_days = days
     if limit is not None and limit > 0:
-        priority_days = sorted(days, key=lambda d: (abs((d - anchor_date).days), d))
-        reported_target = max(1, limit // 2)
-        for d in priority_days:
-            try:
-                earnings.extend(
-                    nasdaq_get_earnings_for_date(
-                        d,
-                        today=anchor_date,
-                        now_et=now_et,
-                        include_links=include_links,
-                    )
-                )
-            except Exception as e:
-                print(f"[nasdaq_fetch] date={d.isoformat()} failed error={type(e).__name__}: {e}")
-                continue
-            reported_count = sum(
-                1 for item in earnings if str(item.get("status") or "").strip().lower() == "reported"
-            )
-            if len(earnings) >= limit and reported_count >= reported_target:
-                return _select_calendar_earnings(earnings, limit=limit, anchor_date=anchor_date)
-        return _select_calendar_earnings(earnings, limit=limit, anchor_date=anchor_date)
+        fetch_days = sorted(days, key=lambda d: (abs((d - anchor_date).days), d))
 
-    max_workers = max(1, min(len(days), int(os.getenv("CALENDAR_FETCH_WORKERS", "4"))))
+    max_workers = max(1, min(len(fetch_days), int(os.getenv("CALENDAR_FETCH_WORKERS", "4"))))
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
         future_to_day = {
             executor.submit(
@@ -703,7 +684,7 @@ def nasdaq_get_weekly_earnings(
                 now_et=now_et,
                 include_links=include_links,
             ): d
-            for d in days
+            for d in fetch_days
         }
         for future in concurrent.futures.as_completed(future_to_day):
             d = future_to_day[future]
@@ -874,23 +855,15 @@ def nasdaq_get_weekly_economic_calendar(anchor_date: date | None = None, *, limi
     days = [week_start + timedelta(days=i) for i in range(5)]
 
     econ_events: list[dict[str, Any]] = []
+    fetch_days = days
     if limit is not None and limit > 0:
-        priority_days = sorted(days, key=lambda d: (abs((d - anchor_date).days), d))
-        for d in priority_days:
-            try:
-                econ_events.extend(nasdaq_get_economic_calendar_for_date(d))
-            except Exception as e:
-                print(f"[nasdaq_econ_fetch] date={d.isoformat()} failed error={type(e).__name__}: {e}")
-                continue
-            if len(econ_events) >= limit:
-                return _select_economic_events(econ_events, limit=limit, anchor_date=anchor_date)
-        return _select_economic_events(econ_events, limit=limit, anchor_date=anchor_date)
+        fetch_days = sorted(days, key=lambda d: (abs((d - anchor_date).days), d))
 
-    max_workers = max(1, min(len(days), int(os.getenv("CALENDAR_FETCH_WORKERS", "4"))))
+    max_workers = max(1, min(len(fetch_days), int(os.getenv("CALENDAR_FETCH_WORKERS", "4"))))
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
         future_to_day = {
             executor.submit(nasdaq_get_economic_calendar_for_date, d): d
-            for d in days
+            for d in fetch_days
         }
         for future in concurrent.futures.as_completed(future_to_day):
             d = future_to_day[future]
@@ -899,6 +872,8 @@ def nasdaq_get_weekly_economic_calendar(anchor_date: date | None = None, *, limi
             except Exception as e:
                 print(f"[nasdaq_econ_fetch] date={d.isoformat()} failed error={type(e).__name__}: {e}")
 
+    if limit is not None and limit > 0:
+        return _select_economic_events(econ_events, limit=limit, anchor_date=anchor_date)
     return econ_events
 
 
