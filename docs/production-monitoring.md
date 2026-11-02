@@ -27,7 +27,9 @@ may include a trailing slash; the workflow normalizes it before checks.
 - Publication 404 status, `noindex`, and absence of AdSense
 - Tool home and 404 `noindex`, with no AdSense script
 - Legacy publication query route containing the tool origin
-- Backend health, calendar, and SEC analysis smoke responses
+- Backend health, calendar, and SEC analysis smoke responses. The calendar check
+  requires a non-empty JSON array with recognized event kinds and current date
+  fields; an empty one-week range is retried with a four-week range.
 
 Every response must match its expected HTTP status and required body marker.
 Checks for excluded routes also fail when the AdSense script is present.
